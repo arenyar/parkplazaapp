@@ -1,0 +1,23 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+
+# Firebase servis hesabı anahtarları — asla commit edilmemeli. Nereye
+# indirilirse indirilsin bu desenlerden biri onu yakalamalı.
+*serviceAccount*.json
+*service-account*.json
+firebase-adminsdk*.json
+
+# Sabit bir yedek şifre ("ParkPlaza2026!") içeriyor — repo GitHub'a
+# taşınırken bilinçli olarak dışarıda bırakıldı (bkz. kullanıcı kararı).
+# Güvenli hale getirilip (env değişkeni) tekrar eklenebilir.
+scripts/migrate-users-to-auth.mjs
+
+.DS_Store
+*.local
+Thumbs.db
+desktop.ini
+.pp-dev.log
+.tmp.driveupload/
