@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
-import { Plus, Pencil, Trash2, QrCode, Camera, X, ClipboardCheck, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, QrCode, Camera, X, ClipboardCheck, AlertTriangle, Printer } from "lucide-react";
 import { T } from "../theme.js";
 import { PageHeader, Card, Button, Select, Input, Field, TextArea } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
@@ -10,9 +10,10 @@ import { validateReading, latestReading } from "../lib/meterValidation.js";
 import { MAHAL_PERIODS, TALEP_TYPES } from "../mockData.js";
 import { locationLabel, collectFireEquipmentLocations, floorPhrase, firmsAtFloorSide } from "../piramitData.js";
 import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
+import { uploadPhoto } from "../lib/storage.js";
 
 function emptyPoint(department) {
-  return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }] };
+  return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }], active: true };
 }
 
 // Teknik departmanı Elektrik ve Mekanik personeli için ayrı checklist görür
@@ -183,7 +184,7 @@ export function resolveMeters(state, point, location) {
 // kontrollerini karıştırma") — burada açılan iş emri sadece başarısız
 // kontrolden doğan "Mahal Kontrol" tipi arıza kaydıdır, Talep/Şikayet
 // modülüyle ilgisi yok.
-export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, meterReadings, compensation, expiryDates, shift }) {
+export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, photoUrl, meterReadings, compensation, expiryDates, shift }) {
   // Kayıt her zaman var olduğu varsayılmaz — bekleyen "Bekliyor" plasehoder'ı
   // sadece MahalKontrol.jsx'in kendi effect'i o departman sayfası açıldığında
   // üretir. Kontroller.jsx (çapraz departman genel görünüm) o sayfa hiç
@@ -253,7 +254,13 @@ export function buildMahalFillPatch(state, point, location, { inspector, answers
   // açıklama metnini geri ayrıştırmak yerine) hangi soruların başarısız
   // olduğu run kaydına da yazılır — kullanıcı teyidiyle: "uygunsuzluk işareti
   // olan mahal kontrollerde bilgi ekranı çıksın".
-  const runPatch = { status: "Tamamlandı", completedBy: inspector, completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
+  // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiçbir zaman
+  // kaydedilmiyordu, sadece true/false tutuluyordu" — artık gerçek dosya
+  // Firebase Storage'a yüklenip (bkz. lib/storage.js uploadPhoto, FillModal
+  // submit) buraya URL olarak geliyor; `photo` boolean'ı geriye dönük
+  // uyumluluk için (eski kayıtları filtreleyen kod bozulmasın) korunuyor,
+  // ama artık `photoUrl` üzerinden gerçek görsele erişilebiliyor.
+  const runPatch = { status: "Tamamlandı", completedBy: inspector, completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, photoUrl: photoUrl || null, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
   const mahalRuns = existing
     ? state.mahalRuns.map((r) => (r.id === existing.id ? { ...r, ...runPatch } : r))
     : [...state.mahalRuns, { id: `mr_${point.id}_${location?.key || "x"}_${key}${shift ? `_${shift.id}` : ""}`, pointId: point.id, department: point.department, periodKey: key, locationKey: location?.key, createdAt: new Date().toISOString(), ...runPatch }];
@@ -285,7 +292,13 @@ export function QrModal({ point, location, floorGroup, onClose }) {
   const suffix = floorGroup ? `-${floorGroup.floorLabel}` : location ? `-${location.key}` : "";
   const titleSuffix = floorGroup ? ` — ${floorGroup.label}` : location ? ` — ${location.label}` : "";
   useEffect(() => {
-    const url = `${window.location.origin}${window.location.pathname}?mahal=${point.id}${param}`;
+    // Kullanıcı teyidiyle: "mobil arayüz webden özel olmalı" — yeni
+    // üretilen/basılan etiketler artık doğrudan personel uygulamasına
+    // (/mobil) düşsün diye sabit /mobil yolu kullanılıyor (önceden
+    // window.location.pathname, yani hangi ekrandan üretildiyse oraya
+    // dönüyordu). App.jsx'teki ?mahal= çözümleme mantığı hem / hem /mobil
+    // için ortak olduğundan daha önce basılmış hiçbir etiket bozulmuyor.
+    const url = `${window.location.origin}/mobil?mahal=${point.id}${param}`;
     QRCode.toDataURL(url, { width: 260, margin: 1, color: { dark: "#12202E", light: "#FFFFFF" } }).then(setDataUrl);
   }, [point.id, param]);
   return (
@@ -307,6 +320,95 @@ export function QrModal({ point, location, floorGroup, onClose }) {
   );
 }
 
+// Bir departmanın TÜM mahal kontrol noktalarının (perFloor noktalarda HER
+// kat grubu/konum için AYRI) basılabilir QR listesini çıkarır — QrModal'daki
+// AYNI URL/etiket mantığı (bkz. yukarıdaki param/titleSuffix), tek tek "QR
+// kodu" butonuna basmak yerine hepsi tek seferde. Kullanıcı teyidiyle:
+// "Qr ları toplu basacağımız bir alan yap ve qr da mahalin olduğu alan
+// yazsın" — her QR'ın altında/üstünde nokta adı + varsa kat/konum etiketi
+// (mahalin bulunduğu alan) yazılı basılır.
+function buildQrTargets(points, state) {
+  const targets = [];
+  points.forEach((p) => {
+    if (!p.perFloor) {
+      targets.push({ key: p.id, url: `${window.location.origin}/mobil?mahal=${p.id}`, label: p.name, sub: null });
+      return;
+    }
+    const locations = getLocations(p, state);
+    const grouped = p.groupByFloor !== false;
+    if (grouped) {
+      const byFloor = new Map();
+      locations.forEach((loc) => {
+        if (!byFloor.has(loc.floorLabel)) byFloor.set(loc.floorLabel, { floorLabel: loc.floorLabel, label: loc.label.split(" — ")[0] });
+      });
+      [...byFloor.values()].forEach((g) => {
+        targets.push({ key: `${p.id}-${g.floorLabel}`, url: `${window.location.origin}/mobil?mahal=${p.id}&floor=${encodeURIComponent(g.floorLabel)}`, label: p.name, sub: g.label });
+      });
+    } else {
+      locations.forEach((loc) => {
+        targets.push({ key: `${p.id}-${loc.key}`, url: `${window.location.origin}/mobil?mahal=${p.id}&loc=${loc.key}`, label: p.name, sub: loc.label });
+      });
+    }
+  });
+  return targets;
+}
+
+function BulkQrModal({ points, state, onClose }) {
+  const [cards, setCards] = useState(null);
+  useEffect(() => {
+    const targets = buildQrTargets(points, state);
+    Promise.all(targets.map((t) =>
+      QRCode.toDataURL(t.url, { width: 220, margin: 1, color: { dark: "#12202E", light: "#FFFFFF" } }).then((dataUrl) => ({ ...t, dataUrl }))
+    )).then(setCards);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function print() { setTimeout(() => window.print(), 60); }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div className="no-print" style={{ background: "#fff", borderRadius: 16, width: 720, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", padding: "22px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#132A20" }}>Toplu QR Bas</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b6a61" }}><X size={18} /></button>
+        </div>
+        {!cards ? (
+          <p style={{ fontSize: 12.5, color: "#8a8879" }}>QR kodları oluşturuluyor…</p>
+        ) : (
+          <>
+            <p style={{ fontSize: 12, color: "#8a8879", margin: "4px 0 14px" }}>{cards.length} QR — her birinin altında hangi mahale/kata ait olduğu yazılı. Yazdırıp kesip ilgili mahale asın.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px,1fr))", gap: 14, marginBottom: 16 }}>
+              {cards.map((c) => (
+                <div key={c.key} style={{ textAlign: "center", border: "1px solid #E3DFD1", borderRadius: 10, padding: 10 }}>
+                  <img src={c.dataUrl} alt={c.label} style={{ width: "100%", maxWidth: 140 }} />
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#132A20", marginTop: 6 }}>{c.label}</div>
+                  {c.sub && <div style={{ fontSize: 10, color: "#8a8879" }}>{c.sub}</div>}
+                </div>
+              ))}
+            </div>
+            <Button icon={Printer} onClick={print}>Yazdır / PDF Kaydet</Button>
+          </>
+        )}
+      </div>
+      {cards && (
+        <div className="invoice-print-area">
+          <div className="fatura-sayfa" style={{ background: "#fff", width: "190mm", minHeight: "277mm", margin: "0 auto 10mm", padding: "14mm", boxSizing: "border-box" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+              {cards.map((c) => (
+                <div key={c.key} style={{ textAlign: "center", border: "1px solid #ccc", borderRadius: 8, padding: 10, breakInside: "avoid" }}>
+                  <img src={c.dataUrl} alt={c.label} style={{ width: "100%" }} />
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: "#1a1a1a", marginTop: 6 }}>{c.label}</div>
+                  {c.sub && <div style={{ fontSize: 9.5, color: "#555" }}>{c.sub}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Kompanzasyon panosu ölçümü — aktif (kW) ve reaktif (kVAr) güçten cosφ
 // hesaplanır (bkz. Enerji.jsx powerFactor, aynı formül burada tekrarlanır —
 // tek kaynak compensationReadings üzerinden yeniden hesaplanabilir olduğu
@@ -317,11 +419,13 @@ function powerFactor(activeKw, reactiveKvar) {
   return { apparentKva, cosPhi: apparentKva > 0 ? activeKw / apparentKva : 0 };
 }
 
-export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, onSubmit, onClose, onQuickRequest, onStartTask, onUpdateEquipment }) {
+export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, onSubmit, onClose }) {
   const [inspector, setInspector] = useState(currentUser || "");
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState("");
-  const [photo, setPhoto] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [meterReadings, setMeterReadings] = useState({});
   const [expiryDates, setExpiryDates] = useState({});
   const [activeKw, setActiveKw] = useState("");
@@ -353,12 +457,16 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
     && (!point.compensation || (activeKw !== "" && reactiveKvar !== ""));
   const compPreview = activeKw !== "" && reactiveKvar !== "" ? powerFactor(Number(activeKw), Number(reactiveKvar)) : null;
 
+  // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
+  // — dosya artık base64'e çevrilip React state'inde tutulmuyor (büyük ve
+  // gereksiz), sadece File nesnesi + hafif bir önizleme URL'i tutuluyor;
+  // gerçek yükleme (bkz. lib/storage.js uploadPhoto) "Kontrolü Tamamla"
+  // tıklanınca yapılıyor.
   function handlePhoto(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setPhoto(reader.result);
-    reader.readAsDataURL(file);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
   }
 
   return (
@@ -373,26 +481,12 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
         {shift && <div style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: "#B4551E", background: "rgba(224,179,84,0.14)", borderRadius: 999, padding: "2px 10px", marginBottom: 6 }}>{shift.label} · {shift.start}–{shift.end}</div>}
         {location?.firms?.length > 0 && <div style={{ fontSize: 11.5, color: "#132A20", marginBottom: 4 }}>Firma: {location.firms.join(", ")}</div>}
         <p style={{ margin: "0 0 8px", fontSize: 12.5, color: "#8a8879" }}>{desc}</p>
-        {(onStartTask || onQuickRequest || onUpdateEquipment) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-            {onStartTask && (
-              <button onClick={onStartTask} style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(47,111,174,0.10)", color: "#2F6FAE", fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: "5px 12px" }}>
-                ▶ Görev Başlat
-              </button>
-            )}
-            {onQuickRequest && (
-              <button onClick={onQuickRequest} style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(220,90,52,0.10)", color: "#DC5A34", fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: "5px 12px" }}>
-                ⚠ Arıza Kaydı Oluştur
-              </button>
-            )}
-            {onUpdateEquipment && (
-              <button onClick={onUpdateEquipment} style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(63,179,127,0.10)", color: "#2E7D4F", fontSize: 11.5, fontWeight: 700, borderRadius: 999, padding: "5px 12px" }}>
-                🔧 Ekipman Güncelle
-              </button>
-            )}
-          </div>
-        )}
 
+        {/* Kullanıcı teyidiyle: "personel seçmeden görev başlamasın" — kontrol
+            formunun geri kalanı (checklist, sayaç, fotoğraf, kaydet) personel
+            seçilmeden hiç gösterilmiyor. `team` zaten çağıran tarafta
+            (department bazlı) filtrelenmiş geliyor — ör. Teknik'in mahal
+            kontrolünde sadece Teknik personeli listelenir. */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Kontrolü yapan</label>
           <select value={inspector} onChange={(e) => setInspector(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DFD1", fontSize: 13.5, color: "#132A20", background: "#fff" }}>
@@ -401,6 +495,9 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
           </select>
         </div>
 
+        {!inspector && <p style={{ fontSize: 12, color: "#8a8879", fontStyle: "italic" }}>Kontrole başlamak için önce kontrolü yapan personeli seçin.</p>}
+
+        {inspector && (<>
         {location?.equipmentIds?.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Son Kullanma Tarihleri (ilk kontrolde girin)</label>
@@ -485,19 +582,33 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
           <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Fotoğraf (opsiyonel)</label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px dashed #C7C4B4", borderRadius: 10, padding: "12px 14px", cursor: "pointer", color: "#8a8879", fontSize: 13 }}>
             <Camera size={16} />
-            {photo ? "Fotoğraf seçildi ✓" : "Fotoğraf çek / seç"}
+            {photoFile ? "Fotoğraf seçildi ✓" : "Fotoğraf çek / seç"}
             <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: "none" }} />
           </label>
+          {photoPreviewUrl && <img src={photoPreviewUrl} alt="Önizleme" style={{ marginTop: 8, width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 10 }} />}
         </div>
 
-        <button disabled={!allAnswered || !inspector} onClick={() => {
+        <button disabled={!allAnswered || !inspector || uploading} onClick={async () => {
           const meterReadingsPayload = {};
           meterChecks.forEach((m) => { if (m.val != null) meterReadingsPayload[m.meterId] = m.val; });
-          onSubmit({ inspector, answers, note, photo, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift });
+          let photoUrl = null;
+          if (photoFile) {
+            setUploading(true);
+            try {
+              photoUrl = await uploadPhoto(photoFile, "mahal-fotograflari");
+            } catch (err) {
+              console.error("Fotoğraf yüklenemedi:", err);
+              alert("Fotoğraf yüklenemedi (kontrol yine de fotoğrafsız kaydedilecek): " + err.message);
+            } finally {
+              setUploading(false);
+            }
+          }
+          onSubmit({ inspector, answers, note, photo: !!photoFile, photoUrl, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift });
         }}
-          style={{ width: "100%", border: "none", borderRadius: 999, padding: "13px 0", fontSize: 14, fontWeight: 700, cursor: allAnswered && inspector ? "pointer" : "default", background: "#DC5A34", color: "#fff", opacity: allAnswered && inspector ? 1 : 0.5 }}>
-          Kontrolü Tamamla
+          style={{ width: "100%", border: "none", borderRadius: 999, padding: "13px 0", fontSize: 14, fontWeight: 700, cursor: allAnswered && inspector && !uploading ? "pointer" : "default", background: "#DC5A34", color: "#fff", opacity: allAnswered && inspector && !uploading ? 1 : 0.5 }}>
+          {uploading ? "Fotoğraf yükleniyor…" : "Kontrolü Tamamla"}
         </button>
+        </>)}
       </div>
     </div>
   );
@@ -518,7 +629,7 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
 // biri zaten kendi başına tek bir mahal) düz liste + konum başına QR
 // gösterilir; groupByFloor=true (varsayılan, ör. yangın tüpü/exit armatürü)
 // kat bazında gruplanır, kat başına TEK QR.
-export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor, onQr, onEdit, onDelete, onOpenNonConformity, initialQuery, canWrite = true }) {
+export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor, onQr, onEdit, onDelete, onToggleActive, onOpenNonConformity, initialQuery, canWrite = true }) {
   const [q, setQ] = useState(initialQuery || "");
   const cardRef = useRef(null);
   const grouped = point.groupByFloor !== false;
@@ -543,7 +654,7 @@ export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor,
   }
   return (
     <div ref={cardRef} style={{ gridColumn: "span 2" }}>
-    <Card>
+    <Card style={point.active === false ? { opacity: 0.55 } : undefined}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
         <div style={{ width: 34, height: 34, borderRadius: 9, background: `${T.accent}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <ClipboardCheck size={17} color={T.accent} strokeWidth={1.8} />
@@ -555,7 +666,16 @@ export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor,
           </div>
         )}
       </div>
-      <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>{point.name}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>{point.name}</div>
+        {canWrite && (
+          <button onClick={onToggleActive} title={point.active === false ? "Mobilde gizli — aktif etmek için tıklayın" : "Mobilde görünür — pasif etmek için tıklayın"}
+            style={{ fontSize: 9, fontWeight: 800, borderRadius: 999, padding: "2px 7px", textTransform: "uppercase", letterSpacing: 0.3, border: "none", cursor: "pointer",
+              color: point.active === false ? T.dimmer : "#3FB37F", background: point.active === false ? T.surface2 : "rgba(63,179,127,0.14)" }}>
+            {point.active === false ? "Pasif" : "Aktif"}
+          </button>
+        )}
+      </div>
       <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{point.assetDesc}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
         <span style={{ fontSize: 10.5, fontWeight: 700, color: T.accent, textTransform: "uppercase" }}>{point.period}{grouped ? " · Kat Bazlı" : ""}{scheduleLabel(point)}{hasShifts ? ` · ${point.shifts.length} vardiya/gün` : ""}</span>
@@ -643,45 +763,6 @@ export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor,
   );
 }
 
-// Ekipman Güncelle — kullanıcı düzeltmesiyle: "ekipman güncellemeden kastım
-// var olan ekipmanın adını kw gücü güncelleme" — bu mahale bağlı zaten var
-// olan ekipman(lar)ın kendi kaydındaki (state.assets) Ad ve Elektrik Gücü
-// (kW) alanlarını düzenler; yeni ekipman bağlamaz/kaldırmaz (o Bakım
-// Takvimi'ndeki "+ Ekipman Ekle" ile yapılır, ayrı bir akış).
-function EquipmentQuickEditModal({ point, assets, onSave, onClose }) {
-  const ids = point.equipmentIds && point.equipmentIds.length > 0 ? point.equipmentIds : (point.assetId ? [point.assetId] : []);
-  const items = ids.map((id) => assets.find((a) => a.id === id)).filter(Boolean);
-  const [drafts, setDrafts] = useState(() => Object.fromEntries(items.map((a) => [a.id, { name: a.name, kw: a.kw ?? "" }])));
-
-  function update(id, field, value) { setDrafts((d) => ({ ...d, [id]: { ...d[id], [field]: value } })); }
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 14, width: 420, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto", padding: "20px 22px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>Ekipman Bilgilerini Güncelle</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim }}><X size={16} /></button>
-        </div>
-        <p style={{ fontSize: 12.5, color: T.dim, margin: "4px 0 16px" }}>{point.name}</p>
-        {items.length === 0 && <p style={{ fontSize: 12.5, color: T.dim }}>Bu mahale bağlı ekipman kaydı yok.</p>}
-        {items.map((a, i) => (
-          <div key={a.id} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < items.length - 1 ? `1px solid ${T.line}` : "none" }}>
-            <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 6 }}>{a.id}</div>
-            <Field label="Ad"><Input value={drafts[a.id].name} onChange={(e) => update(a.id, "name", e.target.value)} style={{ width: "100%" }} /></Field>
-            <Field label="Elektrik Gücü (kW)"><Input type="number" step="0.1" value={drafts[a.id].kw} onChange={(e) => update(a.id, "kw", e.target.value)} style={{ width: "100%" }} /></Field>
-          </div>
-        ))}
-        {items.length > 0 && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button onClick={() => onSave(drafts)}>Kaydet</Button>
-            <Button variant="quiet" onClick={onClose}>Vazgeç</Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // Kullanıcı teyidiyle: "Mahal kontrol kart olarak kalmış liste bazlı
 // görünüm yaparsan ve günlük haftalık aylık olarak katogorize edersen daha
 // iyi olur" — mobilde (dar kart grid'i yerine) tek sütunlu, periyoda göre
@@ -758,6 +839,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   const [form, setForm] = useState(emptyPoint(department));
   const [fillPoint, setFillPoint] = useState(null);
   const [qrPoint, setQrPoint] = useState(null);
+  const [bulkQrOpen, setBulkQrOpen] = useState(false);
   const [ncTarget, setNcTarget] = useState(null);
   const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(null);
@@ -777,20 +859,14 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   // katında çöp var" örneğinde Güvenlik personeli Temizlik'e atayabilmeli.
   const [quickRequestOpen, setQuickRequestOpen] = useState(false);
   const [quickRequestForm, setQuickRequestForm] = useState(null);
-  // Mahal kontrol yaparken doğrudan görev başlatma — kullanıcı teyidiyle:
-  // "Mahal kontrol qr okutulduğunda görev başlat... olmalı". Arıza Kaydı'ndan
-  // (basit form) farklı olarak TAM TaskForm kullanılır (öncelik/atanan/termin)
-  // — departman gören kişinin kendi departmanına kilitli, kendi ekibine iş
-  // atamak için. mahalPointId set edilmez (Mahal Kontrol'ün kendi otomatik
-  // arıza takibiyle karışmasın diye — bkz. buildMahalFillPatch).
-  // Ekipman güncelleme — kullanıcı teyidiyle: "sadece teknikte mahal
-  // kontrolde ekipman güncelleme olsun" + düzeltme: "ekipman güncellemeden
-  // kastım var olan ekipmanın adını kw gücü güncelleme" — yeni ekipman
-  // bağlamaz, sadece sabit (perFloor olmayan) Teknik noktalarında zaten
-  // bağlı ekipman(lar)ın Ad/kW'ını düzenler (bkz. EquipmentQuickEditModal).
-  const [equipEditPoint, setEquipEditPoint] = useState(null);
 
-  const allPoints = state.mahalPoints.filter((p) => p.department === department && !p.archived);
+  // Kullanıcı teyidiyle: "mahal kontrol ve devriye görev kartlarına aktif
+  // pasif koy pasif olanları mobilde gösterme" — pasif işaretlenen bir
+  // mahal/devriye noktası masaüstünde (tanım/yönetim ekranı) hâlâ görünür
+  // kalır (admin geri aktif edebilsin diye), ama mobil kabukta (mobileMode)
+  // listeden tamamen çıkar. `active` alanı olmayan eski kayıtlar varsayılan
+  // olarak aktif sayılır (!== false).
+  const allPoints = state.mahalPoints.filter((p) => p.department === department && !p.archived && (!mobileMode || p.active !== false));
   const points = department === "Teknik" && roleFilter ? allPoints.filter((p) => p.role === roleFilter) : allPoints;
 
   // Mahal Kontrol QR'ı okutulunca (bkz. App.jsx handleQrDecoded) buraya
@@ -845,11 +921,12 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
 
   function startNew() { setForm(emptyPoint(department)); setFormOpen(true); }
   function startEdit(p) { setForm(p); setFormOpen(true); }
+  // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
   function savePoint() {
     if (!form.name.trim() || form.questions.some((q) => !q.text.trim())) return;
     const shifts = (form.shifts || []).filter((s) => s.label.trim() && s.start && s.end);
     const id = form.id || `mp_${Date.now()}`;
-    const payload = { ...form, id, shifts };
+    const payload = { ...form, id, shifts, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...(form.id ? {} : { createdAt: new Date().toISOString(), createdBy: currentUser }) };
     const points2 = form.id ? state.mahalPoints.map((p) => (p.id === id ? payload : p)) : [...state.mahalPoints, payload];
     updateState({ mahalPoints: points2 });
     setFormOpen(false);
@@ -863,6 +940,14 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
     const p = state.mahalPoints.find((mp) => mp.id === id);
     if (!window.confirm(`"${p?.name || "Bu mahal"}" silinsin mi? Kayıt arşivlenecek, geçmiş kontrol verileri raporlarda kalmaya devam edecek.`)) return;
     updateState({ mahalPoints: state.mahalPoints.map((mp) => (mp.id === id ? { ...mp, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : mp)) });
+  }
+  // Kullanıcı teyidiyle: "kartlarına aktif pasif koy" — arşivlemekten
+  // (removePoint, geri dönüşü form içinden gerekiyor) ayrı, kart üzerinden
+  // tek tıkla aç/kapa. Pasif bir nokta silinmiyor/arşivlenmiyor, sadece
+  // mobilde listeden düşüyor (yukarıdaki allPoints filtresi) — geçmiş
+  // kontrol kayıtları ve masaüstü görünürlüğü etkilenmez.
+  function toggleActive(id) {
+    updateState({ mahalPoints: state.mahalPoints.map((mp) => (mp.id === id ? { ...mp, active: mp.active === false } : mp)) });
   }
   function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, { text: "", failOn: "Hayır" }] })); }
   function updateQuestion(i, patch) { setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) })); }
@@ -885,48 +970,54 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   const pointIds = new Set(points.map((p) => p.id));
   const mahalTasks = state.tasks.filter((t) => t.mahalPointId && pointIds.has(t.mahalPointId) && !t.archived);
   function startEditTask(t) { setTaskForm(t); setTaskFormOpen(true); }
-  function startMahalTask(source) {
-    const sourceLabel = source ? `${source.point.name}${source.location ? ` — ${source.location.label}` : ""}` : "";
-    const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-    setTaskForm({ id: null, ticketNo: nextNo, department, issueType: "Talep", priority: "Orta", status: "Yapılacak", description: "", requester: currentUser || "", assignee: "", dueDate: "", location: sourceLabel });
-    setFillPoint(null);
-    setTaskFormOpen(true);
-  }
+  // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
   function saveTask() {
     if (!taskForm.description.trim()) return;
     if (taskForm.id) {
-      const tasks = state.tasks.map((t) => (t.id === taskForm.id ? taskForm : t));
+      const tasks = state.tasks.map((t) => (t.id === taskForm.id ? { ...taskForm, updatedAt: new Date().toISOString(), updatedBy: currentUser } : t));
       updateState({ tasks });
     } else {
-      const task = { ...taskForm, id: `t_${Date.now()}`, createdAt: new Date().toISOString() };
+      const task = { ...taskForm, id: `t_${Date.now()}`, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
       updateState({ tasks: [...state.tasks, task] });
     }
     setTaskFormOpen(false);
   }
   function removeTask(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
 
-  function saveEquipment(drafts) {
-    const assets = state.assets.map((a) => (drafts[a.id] ? { ...a, name: drafts[a.id].name.trim() || a.name, kw: drafts[a.id].kw === "" ? null : Number(drafts[a.id].kw) } : a));
-    updateState({ assets });
-    setEquipEditPoint(null);
-  }
-
+  const [quickUploading, setQuickUploading] = useState(false);
   function startQuickRequest(source) {
     const sourceLabel = source ? `${source.point.name}${source.location ? ` — ${source.location.label}` : ""}` : "";
     setQuickRequestForm({
       department, issueType: "Şikayet", priority: "Orta", status: "Yapılacak", description: "",
-      requester: currentUser || "", assignee: "", dueDate: "", location: sourceLabel, hasPhoto: false,
+      requester: currentUser || "", assignee: "", dueDate: "", location: sourceLabel, hasPhoto: false, photoFile: null,
     });
     setFillPoint(null);
     setQuickRequestOpen(true);
   }
   function handleQuickPhoto(e) {
-    if (e.target.files?.[0]) setQuickRequestForm((f) => ({ ...f, hasPhoto: true }));
+    const file = e.target.files?.[0];
+    if (file) setQuickRequestForm((f) => ({ ...f, photoFile: file, hasPhoto: true }));
   }
-  function saveQuickRequest() {
+  // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
+  // — bkz. lib/storage.js uploadPhoto. `photoFile` (File nesnesi, Firestore'a
+  // yazılamaz) kayıttan önce URL'e çevrilip payload'dan çıkarılıyor.
+  async function saveQuickRequest() {
     if (!quickRequestForm.description.trim()) return;
+    const { photoFile, ...rest } = quickRequestForm;
+    let photoUrl = null;
+    if (photoFile) {
+      setQuickUploading(true);
+      try {
+        photoUrl = await uploadPhoto(photoFile, "gorev-fotograflari");
+      } catch (err) {
+        console.error("Fotoğraf yüklenemedi:", err);
+        alert("Fotoğraf yüklenemedi (kayıt yine de fotoğrafsız oluşturulacak): " + err.message);
+      } finally {
+        setQuickUploading(false);
+      }
+    }
     const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-    const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), company: "", viaMahal: true, ...quickRequestForm };
+    const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), company: "", viaMahal: true, ...rest, photoUrl };
     updateState({ tasks: [...state.tasks, task] });
     setQuickRequestOpen(false);
   }
@@ -936,8 +1027,11 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
       <PageHeader title={title} subtitle={`${points.length} tanımlı mahal — periyoduna göre otomatik kontrol kaydı oluşur`}
         right={<>
           <Button variant="quiet" onClick={() => startQuickRequest()}>+ Talep/Şikayet Aç</Button>
+          {!mobileMode && points.length > 0 && <Button variant="quiet" icon={QrCode} onClick={() => setBulkQrOpen(true)}>Toplu QR Bas</Button>}
           {canWrite && !mobileMode && <Button icon={Plus} onClick={startNew}>Yeni Mahal</Button>}
         </>} />
+
+      {bulkQrOpen && <BulkQrModal points={points} state={state} onClose={() => setBulkQrOpen(false)} />}
 
       {quickRequestOpen && (
         <Card style={{ marginBottom: 16 }}>
@@ -958,7 +1052,12 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
             <Field label="Termin"><Input type="date" value={quickRequestForm.dueDate} onChange={(e) => setQuickRequestForm((f) => ({ ...f, dueDate: e.target.value }))} /></Field>
           </div>
           {!quickRequestForm.location && (
-            <Field label="Kat / Lokasyon"><Input value={quickRequestForm.location} onChange={(e) => setQuickRequestForm((f) => ({ ...f, location: e.target.value }))} placeholder="ör. PH Katı" /></Field>
+            <Field label="Kat / Lokasyon">
+              <Select value={quickRequestForm.location} onChange={(e) => setQuickRequestForm((f) => ({ ...f, location: e.target.value }))}>
+                <option value="">Kat seçin…</option>
+                {state.piramitFloors.map((f) => <option key={f.label} value={f.label}>{f.label}</option>)}
+              </Select>
+            </Field>
           )}
           <Field label="Açıklama" required><TextArea style={{ width: "100%", minHeight: 60 }} placeholder="Gördüğünüz uygunsuzluğu kısaca açıklayın." value={quickRequestForm.description} onChange={(e) => setQuickRequestForm((f) => ({ ...f, description: e.target.value }))} /></Field>
           <div style={{ marginBottom: 14 }}>
@@ -970,7 +1069,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
             </label>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button onClick={saveQuickRequest}>Kaydı Oluştur</Button>
+            <Button onClick={saveQuickRequest} disabled={quickUploading}>{quickUploading ? "Fotoğraf yükleniyor…" : "Kaydı Oluştur"}</Button>
             <Button variant="quiet" onClick={() => setQuickRequestOpen(false)}>Vazgeç</Button>
           </div>
         </Card>
@@ -1080,14 +1179,14 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
             p.perFloor ? (
               <PerFloorCard key={p.id} point={p} locations={getLocations(p, state)} runs={state.mahalRuns} tasks={state.tasks}
                 onFill={(loc, shift) => setFillPoint({ point: p, location: loc, shift })} onQrFloor={(g) => setQrPoint({ point: p, floorGroup: g })} onQr={(loc) => setQrPoint({ point: p, location: loc })}
-                onEdit={() => startEdit(p)} onDelete={() => removePoint(p.id)} onOpenNonConformity={(loc) => setNcTarget({ point: p, location: loc })} canWrite={canWrite}
+                onEdit={() => startEdit(p)} onDelete={() => removePoint(p.id)} onToggleActive={() => toggleActive(p.id)} onOpenNonConformity={(loc) => setNcTarget({ point: p, location: loc })} canWrite={canWrite}
                 initialQuery={floorFocus?.pointId === p.id ? floorPhrase(floorFocus.floorLabel) : undefined} />
             ) : (() => {
               const run = runFor(p, state.mahalRuns);
               const done = run?.status === "Tamamlandı";
               const nc = hasNonConformity(p, state);
               return (
-                <Card key={p.id}>
+                <Card key={p.id} style={p.active === false ? { opacity: 0.55 } : undefined}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                     <div style={{ width: 34, height: 34, borderRadius: 9, background: `${T.accent}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <ClipboardCheck size={17} color={T.accent} strokeWidth={1.8} />
@@ -1100,6 +1199,13 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>{p.name}</div>
+                    {canWrite && (
+                      <button onClick={() => toggleActive(p.id)} title={p.active === false ? "Mobilde gizli — aktif etmek için tıklayın" : "Mobilde görünür — pasif etmek için tıklayın"}
+                        style={{ fontSize: 9, fontWeight: 800, borderRadius: 999, padding: "2px 7px", textTransform: "uppercase", letterSpacing: 0.3, border: "none", cursor: "pointer",
+                          color: p.active === false ? T.dimmer : "#3FB37F", background: p.active === false ? T.surface2 : "rgba(63,179,127,0.14)" }}>
+                        {p.active === false ? "Pasif" : "Aktif"}
+                      </button>
+                    )}
                     {p.role && (
                       <span style={{
                         fontSize: 9, fontWeight: 800, borderRadius: 999, padding: "2px 7px", textTransform: "uppercase", letterSpacing: 0.3,
@@ -1142,14 +1248,10 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
       {fillPoint && (
         <FillModal point={fillPoint.point} location={fillPoint.location} shift={fillPoint.shift} meters={resolveMeters(state, fillPoint.point, fillPoint.location)} state={state}
           run={runFor(fillPoint.point, state.mahalRuns, fillPoint.location?.key, fillPoint.shift?.id)} team={state.team.filter((t) => t.department === fillPoint.point.department)} currentUser={currentUser} assets={state.assets}
-          onSubmit={submitFill} onClose={() => setFillPoint(null)} onQuickRequest={() => startQuickRequest(fillPoint)} onStartTask={() => startMahalTask(fillPoint)}
-          onUpdateEquipment={canWrite && fillPoint.point.department === "Teknik" && !fillPoint.point.perFloor ? () => { setEquipEditPoint(fillPoint.point); setFillPoint(null); } : null} />
+          onSubmit={submitFill} onClose={() => setFillPoint(null)} />
       )}
       {qrPoint && <QrModal point={qrPoint.point} location={qrPoint.location} floorGroup={qrPoint.floorGroup} onClose={() => setQrPoint(null)} />}
       {ncTarget && <NonConformityPanel point={ncTarget.point} location={ncTarget.location} state={state} onClose={() => setNcTarget(null)} />}
-      {equipEditPoint && (
-        <EquipmentQuickEditModal point={equipEditPoint} assets={state.assets} onSave={saveEquipment} onClose={() => setEquipEditPoint(null)} />
-      )}
     </div>
   );
 }

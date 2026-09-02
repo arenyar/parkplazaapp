@@ -1,25 +1,27 @@
-import { Home, Workflow, QrCode, Bell, MoreHorizontal } from "lucide-react";
+import { Home, Workflow, QrCode, MoreHorizontal } from "lucide-react";
 
-export function MobileBottomNav({ view, setView, unreadCount, onScan, onAlerts, onMore }) {
+// Playbook Faz 2 talimatı: "Mobil alt navigasyonu dört öğe ile sınırla:
+// Bugün, İşler, QR ile Başla, Daha Fazla." Önceki sürümde 5. bir öğe olarak
+// ayrı bir "Uyarılar" butonu vardı — kaldırılmadı, sadece taşındı: bildirim
+// zili zaten TopBar'da her genişlikte görünür kalıyor (bkz. TopBar.jsx,
+// mobilde gizlenmiyor), o yüzden burada tekrar etmeye gerek yok. "Daha
+// Fazla" (onMore) App.jsx'te zaten Sidebar'ın gruplu tam menüsünü açıyor —
+// bkz. Sidebar.jsx NAV_GROUPS.
+export function MobileBottomNav({ view, setView, onScan, onMore }) {
   return (
     <nav className="bottom-nav">
-      <button onClick={() => setView("dashboard")} className="bn-btn" style={{ color: view === "dashboard" ? "#5B9BD9" : "#93A3B4" }}>
-        <Home size={19} strokeWidth={1.8} /><span>Ana Sayfa</span>
+      <button onClick={() => setView("dashboard")} className="bn-btn" style={{ color: view === "dashboard" ? "#5B9BD9" : "#93A3B4" }} aria-label="Bugün — Ana Sayfa" aria-current={view === "dashboard" ? "page" : undefined}>
+        <Home size={19} strokeWidth={1.8} aria-hidden="true" /><span>Bugün</span>
       </button>
-      <button onClick={() => setView("operasyonlar")} className="bn-btn" style={{ color: view === "operasyonlar" ? "#5B9BD9" : "#93A3B4" }}>
-        <Workflow size={19} strokeWidth={1.8} /><span>Operasyon</span>
+      <button onClick={() => setView("operasyonlar")} className="bn-btn" style={{ color: view === "operasyonlar" ? "#5B9BD9" : "#93A3B4" }} aria-label="İşler — Operasyonlar" aria-current={view === "operasyonlar" ? "page" : undefined}>
+        <Workflow size={19} strokeWidth={1.8} aria-hidden="true" /><span>İşler</span>
       </button>
-      <button onClick={onScan} className="bn-scan">
-        <span className="bn-scan-circle"><QrCode size={22} color="#0B1420" /></span>
-        <span style={{ color: "#93A3B4", marginTop: 1 }}>Tara</span>
+      <button onClick={onScan} className="bn-scan" aria-label="QR ile Başla — tara">
+        <span className="bn-scan-circle"><QrCode size={22} color="#0B1420" aria-hidden="true" /></span>
+        <span style={{ color: "#93A3B4", marginTop: 1 }}>QR ile Başla</span>
       </button>
-      <button onClick={onAlerts} className="bn-btn" style={{ color: "#93A3B4", position: "relative" }}>
-        <Bell size={19} strokeWidth={1.8} />
-        <span>Uyarılar</span>
-        {unreadCount > 0 && <span style={{ position: "absolute", top: -2, right: "22%", background: "#E2685A", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 999, minWidth: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{unreadCount}</span>}
-      </button>
-      <button onClick={onMore} className="bn-btn" style={{ color: "#93A3B4" }}>
-        <MoreHorizontal size={19} strokeWidth={1.8} /><span>Diğer</span>
+      <button onClick={onMore} className="bn-btn" style={{ color: "#93A3B4" }} aria-label="Daha Fazla — tüm menü">
+        <MoreHorizontal size={19} strokeWidth={1.8} aria-hidden="true" /><span>Daha Fazla</span>
       </button>
     </nav>
   );

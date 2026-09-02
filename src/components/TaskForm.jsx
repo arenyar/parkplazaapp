@@ -4,13 +4,24 @@ export const TASK_STATUSES = ["Yapılacak", "Üzr. Çalışılıyor", "Tamamland
 export const TASK_PRIORITIES = ["Düşük", "Orta", "Yüksek", "Kritik"];
 
 export function emptyTask(department, nextNo) {
-  return { id: null, ticketNo: nextNo, department, issueType: "Talep", priority: "Orta", status: "Yapılacak", description: "", requester: "", assignee: "", dueDate: "" };
+  return { id: null, ticketNo: nextNo, department, issueType: "Talep", priority: "Orta", status: "Yapılacak", description: "", requester: "", assignee: "", dueDate: "", resolution: "" };
 }
 
 // Ortak görev oluşturma/düzenleme formu — Görevler sayfası ve Teknik modülünün
 // "Görevler" alt sekmesi aynı formu kullanır. lockDepartment verilirse (örn.
 // "Teknik") departman sabitlenir ve seçim kutusu yerine salt-okunur gösterilir.
+// Kullanıcı teyidiyle: "arıza kaydında tamamlandı dediğinde açıklama girilsin
+// tamamlandı ama ne yapıldıda tamamlandı gibi" — Durum "Tamamlandı" seçilince
+// "Çözüm / Ne Yapıldı" alanı zorunlu hale gelir (Kaydet, boşsa engellenir).
 export function TaskForm({ form, setForm, departments, lockDepartment, onSave, onCancel }) {
+  const completing = form.status === "Tamamlandı";
+  function handleSave() {
+    if (completing && !(form.resolution || "").trim()) {
+      alert("Görevi Tamamlandı olarak kaydetmeden önce ne yapıldığını (çözüm) açıklayın.");
+      return;
+    }
+    onSave();
+  }
   return (
     <Card style={{ marginBottom: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
@@ -29,8 +40,13 @@ export function TaskForm({ form, setForm, departments, lockDepartment, onSave, o
         <Field label="Atanan"><Input value={form.assignee} onChange={(e) => setForm((f) => ({ ...f, assignee: e.target.value }))} /></Field>
       </div>
       <Field label="Açıklama" required><TextArea style={{ width: "100%", minHeight: 60 }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+      {completing && (
+        <Field label="Çözüm / Ne Yapıldı" required>
+          <TextArea style={{ width: "100%", minHeight: 60 }} placeholder="Tamamlandı olarak işaretlemeden önce yapılan işi açıklayın." value={form.resolution || ""} onChange={(e) => setForm((f) => ({ ...f, resolution: e.target.value }))} />
+        </Field>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button onClick={onSave}>Kaydet</Button>
+        <Button onClick={handleSave}>Kaydet</Button>
         <Button variant="quiet" onClick={onCancel}>Vazgeç</Button>
       </div>
     </Card>

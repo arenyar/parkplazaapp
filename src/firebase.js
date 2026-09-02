@@ -1,6 +1,7 @@
 import { initializeApp, deleteApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { showToast } from "./lib/toast.js";
 
 // Kullanıcı teyidiyle: "yine aynı klasörde firebase bağlantısını yap" —
 // mevcut, zaten kurulu Firebase projesi (parkplaza-451fa) yeniden kullanılıyor
@@ -22,7 +23,7 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-NSE6DMNYRJ",
 };
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
@@ -63,21 +64,35 @@ export async function createAuthAccount(email, password) {
 
 // Aynı projedeki eski/basit sürüm (C:\...\firebase-project) verisini
 // "appdata" koleksiyonunda "tanimlar"/"records"/"bakimMarks" gibi anahtarlarla
-// tutuyor — firestore.rules bu koleksiyonda herkese okuma/yazma izni veriyor
-// (match /appdata/{document}). Bu uygulama AYNI koleksiyonu, ÇAKIŞMAYACAK
-// tek bir anahtarla kullanıyor — böylece firestore.rules'a dokunmadan,
-// zaten açık olan izinle çalışır.
+// tutuyor — bu uygulama AYNI koleksiyonu, ÇAKIŞMAYACAK tek bir anahtarla
+// kullanıyor. Bu belge artık (appdata/parkplaza-ops-center-state) SADECE
+// giriş yapmış kullanıcılara açık (request.auth != null) — kardeş
+// uygulamanın diğer belgeleri hâlâ eski açık kuralla çalışıyor, bkz.
+// firestore.rules'taki belge-özel istisna. Canlı kural doğrudan test
+// edilerek doğrulandı (yetkisiz istemci "permission-denied" alıyor).
 const STATE_DOC = doc(db, "appdata", "parkplaza-ops-center-state");
 
 // Tüm uygulama state'i TEK bir doküman olarak tutulur (mevcut src/mockData.js
 // makeInitialState() şeklinin birebir aynısı) — App.jsx'teki updateState zaten
 // tek bir state objesini shallow-merge ettiği için, kod tarafında başka bir
 // değişikliğe gerek kalmadan bu tek dokümanı okuyup yazmak yeterli.
+//
+// includeMetadataChanges:true + snap.metadata.fromCache — playbook talimatı:
+// "son senkronizasyon zamanı ve bağlantı durumu" göstermek için (bkz.
+// App.jsx/TopBar.jsx). fromCache=true demek: bu veri sunucudan değil yerel
+// önbellekten geliyor (çevrimdışı ya da henüz senkronize olmadı); false
+// demek: sunucudan doğrulanmış, gerçek "son senkron" anı budur.
+// Dinleme hatası da (sadece yazma değil) kullanıcıya bildirilir — playbook
+// talimatı "sessiz veri kaybı olmamalı" yazma kadar okuma için de geçerli:
+// ör. oturum süresi dolmuş/başka bir cihazda şifre değiştirilmiş bir
+// istemci, ekranda ESKİ veriyi göstermeye devam edip hiçbir güncelleme
+// almadığını fark etmeden çalışabilirdi.
 export function subscribeState(onData, onError) {
-  return onSnapshot(STATE_DOC, (snap) => {
-    onData(snap.exists() ? snap.data() : null);
+  return onSnapshot(STATE_DOC, { includeMetadataChanges: true }, (snap) => {
+    onData(snap.exists() ? snap.data() : null, { fromCache: snap.metadata.fromCache });
   }, (err) => {
     console.error("Firestore dinleme hatası:", err);
+    showToast(err.code === "permission-denied" ? "Oturumunuz geçersiz olmuş olabilir — sayfayı yenileyip tekrar giriş yapmayı deneyin." : "Canlı veri bağlantısı kesildi — sayfayı yenileyin.", "error");
     if (onError) onError(err);
   });
 }
@@ -109,10 +124,34 @@ function stripUndefined(value) {
 // gönderiyor. Böylece aynı anda farklı alanlara (ör. biri companies, biri
 // mahalRuns) yazan iki istemci birbirini ezmez; sadece AYNI alana gerçekten
 // aynı anda yazılırsa (nadir) o alan için hâlâ son yazan kazanır.
+// Playbook talimatı: "Veri yazma hatalarında kullanıcı girdisini koru ve
+// yeniden dene imkânı sun... sessiz veri kaybı olmamalı." Önceden hata
+// sadece console.error'a düşüyordu — ekranda hiçbir iz bırakmıyordu, kullanıcı
+// değişikliğin kaydedildiğini sanıyordu (yerel state zaten iyimser
+// güncellendiği için). Artık başarısız yazma toast ile bildiriliyor; yerel
+// React state (ekrandaki değer) hâlâ duruyor, kullanıcı sayfayı kapatmadığı
+// sürece veri kaybolmuyor, tekrar bir işlem yaparak (ör. formu tekrar
+// kaydet) yeniden deneyebilir.
+// Kullanıcı teyidiyle bulunan sorun: "güvenlik devriyede hata veriyor...
+// bu ve buna benzer hataları kontrol et" — bu fonksiyon TÜM yazma
+// hatalarında (asıl sebep ne olursa olsun: geçersiz oturum, ağ kopukluğu,
+// Firestore kotası...) AYNI "bağlantınızı kontrol edin" mesajını
+// gösteriyordu. Bu yanıltıcıydı: bu oturumda birden fazla kez gerçek sebep
+// bağlantı değil, oturumun (Firebase Auth token'ının) geçersiz/bayat
+// olmasıydı (ör. şifre başka bir cihazda değiştirildiğinde) — kullanıcı
+// WiFi'ını kontrol edip zaman kaybediyordu, oysa çözüm sayfayı yenileyip
+// yeniden giriş yapmaktı. subscribeState'teki (okuma/dinleme) hata
+// mesajıyla AYNI ayrım burada da (yazma) uygulanıyor.
+function saveErrorMessage(code) {
+  if (code === "permission-denied") return "Kaydedilemedi — oturumunuz geçersiz olmuş olabilir. Sayfayı yenileyip tekrar giriş yapmayı deneyin. Değişiklik ekranda duruyor, kaybolmadı.";
+  if (code === "unavailable" || code === "deadline-exceeded") return "Kaydedilemedi — bağlantınızı kontrol edin. Değişiklik ekranda duruyor ama sunucuya iletilemedi, tekrar deneyin.";
+  return "Kaydedilemedi — beklenmeyen bir hata oluştu. Değişiklik ekranda duruyor, sayfayı yenilemeden tekrar deneyin.";
+}
 export async function saveState(patch) {
   try {
     await setDoc(STATE_DOC, stripUndefined(patch), { merge: true });
   } catch (e) {
     console.error("Firestore kaydetme hatası:", e);
+    showToast(saveErrorMessage(e.code), "error");
   }
 }

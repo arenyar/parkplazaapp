@@ -1,6 +1,8 @@
-import { FileText, Download } from "lucide-react";
+import { useState } from "react";
+import { FileText, Download, Printer, X } from "lucide-react";
 import { T } from "../theme.js";
 import { PageHeader, Card, Button } from "../components/ui.jsx";
+import { riskScore, riskBand } from "../lib/sla.js";
 
 const REPORTS = [
   { key: "gunluk", label: "Günlük Operasyon Raporu", desc: "Bugünkü tüm görev, kontrol ve olay özeti" },
@@ -11,27 +13,261 @@ const REPORTS = [
   { key: "risk", label: "Risk Raporu", desc: "Açık risk kayıtları ve aksiyon durumu" },
 ];
 
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function daysAgoStr(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+function trDate(dateStr) {
+  if (!dateStr) return "—";
+  const [y, m, d] = dateStr.slice(0, 10).split("-");
+  return `${d}.${m}.${y}`;
+}
+function money(n) { return (n || 0).toLocaleString("tr-TR"); }
+
+// Kullanıcı teyidiyle bulunan hata: "Raporlar kısmı çalışmıyor" — eski kod
+// "Oluştur"a basınca konsola JSON basıp bir alert gösteriyordu, hiçbir
+// gerçek rapor içeriği YOKTU. Artık her rapor state'teki GERÇEK verilerden
+// (tasks/mahalRuns/incidents/assets/energy/risks — uydurma veri yok)
+// hesaplanıyor ve FaturaBasim.jsx'teki ile aynı yazdır/PDF akışıyla
+// (window.print + .invoice-print-area) görüntülenip yazdırılabiliyor.
+function buildGunlukRapor(state) {
+  const today = todayStr();
+  const tasksToday = (state.tasks || []).filter((t) => !t.archived && (t.createdAt || "").slice(0, 10) === today);
+  const completedToday = (state.tasks || []).filter((t) => !t.archived && t.status === "Tamamlandı" && (t.updatedAt || "").slice(0, 10) === today);
+  const openTasks = (state.tasks || []).filter((t) => !t.archived && t.status !== "Tamamlandı" && t.status !== "İptal");
+  const runsToday = (state.mahalRuns || []).filter((r) => r.status === "Tamamlandı" && (r.completedAt || "").slice(0, 10) === today);
+  const incidentsToday = (state.incidents || []).filter((i) => (i.at || i.tarih || "").slice(0, 10) === today);
+  return {
+    title: "Günlük Operasyon Raporu", subtitle: trDate(today),
+    stats: [
+      { label: "Bugün Açılan Görev", value: tasksToday.length },
+      { label: "Bugün Tamamlanan Görev", value: completedToday.length },
+      { label: "Toplam Açık Görev", value: openTasks.length },
+      { label: "Bugün Tamamlanan Mahal Kontrol", value: runsToday.length },
+      { label: "Bugünkü Olay Kaydı", value: incidentsToday.length },
+    ],
+    tables: [
+      { title: "Bugün Açılan Görevler", columns: ["Bilet No", "Departman", "Öncelik", "Durum", "Açıklama"],
+        rows: tasksToday.map((t) => [t.ticketNo, t.department, t.priority, t.status, t.description]) },
+      { title: "Bugünkü Olay Kayıtları", columns: ["Saat", "Konum", "Açıklama", "Bildiren"],
+        rows: incidentsToday.map((i) => [i.saat || fmtTime(i.at), i.location || "—", i.description, i.reportedBy || "—"]) },
+    ],
+  };
+}
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"; }
+
+function buildHaftalikRapor(state) {
+  const since = daysAgoStr(6);
+  const tasks = (state.tasks || []).filter((t) => !t.archived && (t.createdAt || "").slice(0, 10) >= since);
+  const depts = [...new Set([...(state.departments || []), ...tasks.map((t) => t.department)])].filter(Boolean);
+  const rows = depts.map((d) => {
+    const deptTasks = tasks.filter((t) => t.department === d);
+    const completed = deptTasks.filter((t) => t.status === "Tamamlandı").length;
+    const open = deptTasks.filter((t) => t.status !== "Tamamlandı" && t.status !== "İptal").length;
+    return [d, deptTasks.length, completed, open];
+  }).filter((r) => r[1] > 0);
+  const runsWeek = (state.mahalRuns || []).filter((r) => r.status === "Tamamlandı" && (r.completedAt || "").slice(0, 10) >= since);
+  return {
+    title: "Haftalık Rapor", subtitle: `${trDate(since)} — ${trDate(todayStr())}`,
+    stats: [
+      { label: "Açılan Görev (7 Gün)", value: tasks.length },
+      { label: "Tamamlanan Görev (7 Gün)", value: tasks.filter((t) => t.status === "Tamamlandı").length },
+      { label: "Tamamlanan Mahal Kontrol", value: runsWeek.length },
+    ],
+    tables: [{ title: "Departman Bazlı Özet", columns: ["Departman", "Açılan", "Tamamlanan", "Açık"], rows }],
+  };
+}
+
+function buildTeknikRapor(state) {
+  const teknikTasks = (state.tasks || []).filter((t) => !t.archived && t.department === "Teknik");
+  const byType = {};
+  teknikTasks.forEach((t) => { const k = t.issueType || "Diğer"; byType[k] = (byType[k] || 0) + 1; });
+  const assets = state.assets || [];
+  const today = todayStr();
+  const expiringSoon = assets.filter((a) => a.expiryDate && a.expiryDate <= daysAgoStr(-30) && a.expiryDate >= today);
+  const expired = assets.filter((a) => a.expiryDate && a.expiryDate < today);
+  return {
+    title: "Teknik Rapor", subtitle: trDate(today),
+    stats: [
+      { label: "Toplam Teknik Görev", value: teknikTasks.length },
+      { label: "Açık Teknik Görev", value: teknikTasks.filter((t) => t.status !== "Tamamlandı" && t.status !== "İptal").length },
+      { label: "Toplam Varlık", value: assets.length },
+      { label: "Süresi Geçmiş (Son Kul. Tarihi)", value: expired.length },
+      { label: "30 Gün İçinde Dolacak", value: expiringSoon.length },
+    ],
+    tables: [
+      { title: "Görev Türü Dağılımı", columns: ["Tür", "Adet"], rows: Object.entries(byType) },
+      { title: "Süresi Geçmiş / Yaklaşan Varlıklar", columns: ["Varlık", "Kategori", "Son Kullanma Tarihi"],
+        rows: [...expired, ...expiringSoon].map((a) => [a.name, a.category, trDate(a.expiryDate)]) },
+    ],
+  };
+}
+
+function buildGuvenlikRapor(state) {
+  const since = daysAgoStr(29);
+  const incidents = (state.incidents || []).filter((i) => (i.at || i.tarih || "").slice(0, 10) >= since);
+  const runs = (state.mahalRuns || []).filter((r) => r.department === "Güvenlik");
+  const runsCompleted = runs.filter((r) => r.status === "Tamamlandı");
+  return {
+    title: "Güvenlik Raporu", subtitle: `Son 30 gün — ${trDate(since)} – ${trDate(todayStr())}`,
+    stats: [
+      { label: "Olay Kaydı (30 Gün)", value: incidents.length },
+      { label: "Tamamlanan Devriye Kontrolü", value: runsCompleted.length },
+      { label: "Bekleyen Devriye Kontrolü", value: runs.length - runsCompleted.length },
+    ],
+    tables: [{ title: "Olay Kayıtları", columns: ["Tarih", "Konum", "Açıklama", "Bildiren"],
+      rows: incidents.map((i) => [trDate(i.tarih || i.at), i.location || "—", i.description, i.reportedBy || "—"]) }],
+  };
+}
+
+function buildEnerjiRapor(state) {
+  const daily = state.energyDaily || [];
+  const total = daily.reduce((s, d) => s + d.kwh, 0);
+  const avg = daily.length ? Math.round(total / daily.length) : 0;
+  const peak = daily.reduce((max, d) => (d.kwh > (max?.kwh || 0) ? d : max), null);
+  const summary = state.energySummary || {};
+  const pct = summary.lastMonth ? Math.round(((summary.thisMonth - summary.lastMonth) / summary.lastMonth) * 100) : 0;
+  return {
+    title: "Enerji Raporu", subtitle: `Son ${daily.length} gün`,
+    stats: [
+      { label: "Bu Ay Toplam", value: `${money(summary.thisMonth)} ${summary.unit || "kWh"}` },
+      { label: "Geçen Aya Göre", value: `${pct > 0 ? "+" : ""}${pct}%` },
+      { label: "Günlük Ortalama", value: `${money(avg)} kWh` },
+      { label: "En Yüksek Gün", value: peak ? `${trDate(peak.date)} — ${money(peak.kwh)} kWh` : "—" },
+    ],
+    tables: [{ title: "Günlük Tüketim", columns: ["Tarih", "kWh"], rows: daily.slice().reverse().map((d) => [trDate(d.date), money(d.kwh)]) }],
+  };
+}
+
+function buildRiskRapor(state) {
+  const risks = state.risks || [];
+  const open = risks.filter((r) => r.status !== "Kapalı" && r.status !== "Kapandı");
+  const byBand = { Kritik: 0, Yüksek: 0, Orta: 0, Düşük: 0 };
+  open.forEach((r) => { byBand[riskBand(riskScore(r.probability, r.impact)).label]++; });
+  const sorted = open.slice().sort((a, b) => riskScore(b.probability, b.impact) - riskScore(a.probability, a.impact));
+  return {
+    title: "Risk Raporu", subtitle: trDate(todayStr()),
+    stats: [
+      { label: "Açık Risk", value: open.length },
+      { label: "Kritik", value: byBand.Kritik },
+      { label: "Yüksek", value: byBand.Yüksek },
+      { label: "Orta", value: byBand.Orta },
+      { label: "Düşük", value: byBand.Düşük },
+    ],
+    tables: [{ title: "Açık Riskler (Skora Göre Sıralı)", columns: ["Başlık", "Konum", "Seviye", "Sorumlu", "Termin", "Durum"],
+      rows: sorted.map((r) => [r.title, r.location || "—", riskBand(riskScore(r.probability, r.impact)).label, r.owner || "—", trDate(r.dueDate), r.status]) }],
+  };
+}
+
+const BUILDERS = { gunluk: buildGunlukRapor, haftalik: buildHaftalikRapor, teknik: buildTeknikRapor, guvenlik: buildGuvenlikRapor, enerji: buildEnerjiRapor, risk: buildRiskRapor };
+
+function ReportPage({ report, printDate }) {
+  return (
+    <div className="fatura-sayfa" style={{ background: "#fff", color: "#1a1a1a", width: "190mm", minHeight: "160mm", margin: "0 auto 10mm", padding: "14mm", fontFamily: "Arial, Helvetica, sans-serif", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#5CA83E" }}>PARK PLAZA</div>
+        <div style={{ fontSize: 11, color: "#333" }}>{trDate(printDate)}</div>
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 2 }}>{report.title}</div>
+      <div style={{ fontSize: 11.5, color: "#555", marginBottom: 16 }}>{report.subtitle}</div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+        {report.stats.map((s, i) => (
+          <div key={i} style={{ flex: "1 1 140px", border: "1px solid #ddd", borderRadius: 6, padding: "10px 12px" }}>
+            <div style={{ fontSize: 10, color: "#777", textTransform: "uppercase", fontWeight: 700 }}>{s.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", marginTop: 2 }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {report.tables.map((tbl, ti) => (
+        <div key={ti} style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{tbl.title}</div>
+          {tbl.rows.length === 0 ? (
+            <div style={{ fontSize: 11, color: "#888" }}>Kayıt yok.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+              <thead><tr>{tbl.columns.map((c, i) => <th key={i} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9.5, fontWeight: 700, color: "#444", borderBottom: "1px solid #999" }}>{c}</th>)}</tr></thead>
+              <tbody>
+                {tbl.rows.map((row, ri) => (
+                  <tr key={ri} style={{ borderBottom: "1px solid #eee" }}>
+                    {row.map((cell, ci) => <td key={ci} style={{ padding: "4px 6px" }}>{cell}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Raporlar({ state }) {
-  function generate(key) {
-    // Gerçek PDF/Excel export'u backend entegrasyonunda eklenecek — şimdilik
-    // önizleme olarak konsola JSON basıyoruz, buton işlevsiz değil.
-    const snapshot = { report: key, generatedAt: new Date().toISOString(), taskCount: state.tasks.length };
-    console.log("[rapor önizleme]", snapshot);
-    alert(`"${REPORTS.find((r) => r.key === key)?.label}" için önizleme konsola yazıldı. PDF/Excel export'u backend bağlandığında eklenecek.`);
-  }
+  const [selected, setSelected] = useState(null);
+  const report = selected ? BUILDERS[selected](state) : null;
+  const printDate = new Date().toISOString().slice(0, 10);
+
+  function print() { setTimeout(() => window.print(), 60); }
+
   return (
     <div>
-      <PageHeader title="Raporlar" subtitle="Tek tıkla rapor oluşturma" />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px,1fr))", gap: 14 }}>
+      <PageHeader title="Raporlar" subtitle="Tek tıkla, gerçek verilerden rapor oluştur ve yazdır/PDF kaydet" />
+      <div className="no-print" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px,1fr))", gap: 14, marginBottom: 20 }}>
         {REPORTS.map((r) => (
-          <Card key={r.key}>
+          <Card key={r.key} style={selected === r.key ? { border: `1px solid ${T.accent}` } : undefined}>
             <FileText size={20} color={T.accent} />
             <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>{r.label}</div>
             <div style={{ fontSize: 11.5, color: T.dim, marginTop: 3, marginBottom: 12 }}>{r.desc}</div>
-            <Button variant="ghost" icon={Download} onClick={() => generate(r.key)}>Oluştur</Button>
+            <Button variant="ghost" icon={Download} onClick={() => setSelected(r.key)}>Oluştur</Button>
           </Card>
         ))}
       </div>
+
+      {report && (
+        <Card className="no-print" style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{report.title} — Önizleme</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button icon={Printer} onClick={print}>Yazdır / PDF Kaydet</Button>
+              <button onClick={() => setSelected(null)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 7, padding: "6px 8px", cursor: "pointer", color: T.dim, display: "flex" }}><X size={15} /></button>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "12px 0" }}>
+            {report.stats.map((s, i) => (
+              <div key={i} style={{ flex: "1 1 140px", border: `1px solid ${T.line}`, borderRadius: 8, padding: "10px 12px", background: T.surface2 }}>
+                <div style={{ fontSize: 10, color: T.dim, textTransform: "uppercase", fontWeight: 700 }}>{s.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.ink, marginTop: 2 }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+          {report.tables.map((tbl, ti) => (
+            <div key={ti} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 6 }}>{tbl.title}</div>
+              {tbl.rows.length === 0 ? (
+                <div style={{ fontSize: 11.5, color: T.dim }}>Kayıt yok.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ textAlign: "left", color: T.dim }}>{tbl.columns.map((c, i) => <th key={i} style={{ padding: "4px 6px" }}>{c}</th>)}</tr></thead>
+                    <tbody>{tbl.rows.map((row, ri) => (
+                      <tr key={ri} style={{ borderTop: `1px solid ${T.line}` }}>{row.map((cell, ci) => <td key={ci} style={{ padding: "4px 6px", color: T.ink }}>{cell}</td>)}</tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {report && (
+        <div className="invoice-print-area">
+          <ReportPage report={report} printDate={printDate} />
+        </div>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Eye, EyeOff, Lock, Mail, ArrowLeft } from "lucide-react";
 import { T } from "../theme.js";
 import { Button, Input, Field } from "../components/ui.jsx";
 import { login, resetPasswordEmail } from "../firebase.js";
+import { authErrorMessage } from "../lib/authErrors.js";
 
 // Şifre giriş ekranı — kullanıcı teyidiyle: "Birde Şifre giriş ekranı olsun...
 // Kullanıcı giriş ekranında şifre göster ve şifre hatırlat ekranı olsun."
@@ -21,14 +22,6 @@ const BRAND_ACCENT = "#B84B3E";
 // mesaj gösterir. auth/invalid-credential yanlış e-posta VEYA şifre için
 // ortak kod (Firebase kasıtlı olarak hangisinin yanlış olduğunu söylemez —
 // hesap keşfini zorlaştırmak için).
-function loginErrorMessage(code) {
-  if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") return "E-posta veya şifre hatalı.";
-  if (code === "auth/too-many-requests") return "Çok fazla başarısız deneme — bir süre sonra tekrar deneyin.";
-  if (code === "auth/network-request-failed") return "Bağlantı hatası — internet bağlantınızı kontrol edin.";
-  if (code === "auth/invalid-email") return "Geçersiz e-posta adresi.";
-  return "Giriş yapılamadı — bir sorun oluştu.";
-}
-
 export function Login({ branding, onLoggedIn }) {
   const [mode, setMode] = useState("login"); // login | forgot | sent
   const [email, setEmail] = useState("");
@@ -48,7 +41,7 @@ export function Login({ branding, onLoggedIn }) {
       // Firestore aboneliği App.jsx'te authListen'ın tetiklediği effect'te
       // başlar — burada başka bir şey yapmaya gerek yok.
     } catch (err) {
-      setError(loginErrorMessage(err.code));
+      setError(authErrorMessage(err.code));
     } finally {
       setSubmitting(false);
     }
@@ -99,9 +92,9 @@ export function Login({ branding, onLoggedIn }) {
                   <Lock size={14} color={T.dimmer} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
                   <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
                     style={{ width: "100%", boxSizing: "border-box", paddingLeft: 30, paddingRight: 34 }} required />
-                  <button type="button" onClick={() => setShowPassword((s) => !s)} title={showPassword ? "Şifreyi gizle" : "Şifreyi göster"}
+                  <button type="button" onClick={() => setShowPassword((s) => !s)} title={showPassword ? "Şifreyi gizle" : "Şifreyi göster"} aria-label={showPassword ? "Şifreyi gizle" : "Şifreyi göster"}
                     style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex" }}>
-                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
                   </button>
                 </div>
               </Field>

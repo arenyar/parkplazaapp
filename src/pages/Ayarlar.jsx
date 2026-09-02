@@ -5,6 +5,8 @@ import { PageHeader, Card, CardTitle, Button, Field, Input, Select } from "../co
 import { NAV_ITEMS } from "../layout/navItems.js";
 import { MobilTasarim } from "./MobilTasarim.jsx";
 import { resetPasswordEmail } from "../firebase.js";
+import { showToast } from "../lib/toast.js";
+import { authErrorMessage } from "../lib/authErrors.js";
 
 const TABS = [
   { key: "genel", label: "Genel" },
@@ -81,7 +83,7 @@ function UserAccessTable({ state, updateState, canWrite }) {
     if (!account) return;
     resetPasswordEmail(account.username)
       .then(() => { setResetSentId(personId); setTimeout(() => setResetSentId((id) => (id === personId ? null : id)), 4000); })
-      .catch((err) => window.alert(`E-posta gönderilemedi: ${err.message || err.code}`));
+      .catch((err) => showToast(`E-posta gönderilemedi: ${authErrorMessage(err.code)}`, "error"));
   }
 
   return (

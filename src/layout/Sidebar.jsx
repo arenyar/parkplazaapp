@@ -1,19 +1,51 @@
-import { Menu, User } from "lucide-react";
+import { useState } from "react";
+import { Menu, ChevronDown } from "lucide-react";
 import { T } from "../theme.js";
-import { NAV_ITEMS } from "./navItems.js";
+import { NAV_ITEMS, NAV_GROUPS } from "./navItems.js";
 import { AvatarInitials } from "../components/ui.jsx";
 
+// Gruplu/açılır-kapanır menü — playbook talimatı: "Sidebar'da grup başlıkları
+// ve açılır/kapanır alt menü oluştur... Aktif view ve aktif grubu görsel
+// olarak ayır" (Faz 2). Aynı `nav` bloğu hem masaüstü sabit sidebar'da hem
+// mobil "Diğer" panelinde kullanılıyor (tek kaynak) — playbook'un "Daha
+// Fazla içinde Bina/Kaynaklar/Risk ve Rapor/Yönetim gruplarını göster"
+// isteği bu yüzden ayrı bir bileşen gerektirmeden otomatik karşılanıyor.
 export function Sidebar({ view, setView, branding, currentUser, role, allowedKeys, mobileNavOpen, setMobileNavOpen }) {
   const items = allowedKeys ? NAV_ITEMS.filter((it) => allowedKeys.includes(it.key)) : NAV_ITEMS;
+  const activeGroup = items.find((it) => it.key === view)?.group;
+  // Varsayılan: hepsi açık (15 öğe için kapalı başlamak daha çok tıklama
+  // ister) — kullanıcı isterse daraltır, aktif grup her zaman açık kalır
+  // (kapatılmış olsa bile) ki geçerli sayfa gizlenmesin.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  function toggleGroup(g) {
+    setCollapsed((s) => { const next = new Set(s); if (next.has(g)) next.delete(g); else next.add(g); return next; });
+  }
+  const groups = NAV_GROUPS.map((g) => ({ group: g, items: items.filter((it) => it.group === g) })).filter((g) => g.items.length > 0);
   const nav = (
-    <nav className="sidebar-nav" style={{ gap: 3 }}>
-      {items.map(({ key, label, icon: Icon }) => (
-        <button key={key} onClick={() => { setView(key); setMobileNavOpen(false); }} className={`nav-item${view === key ? " active" : ""}`}
-          style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, border: "none", cursor: "pointer", textAlign: "left", fontSize: 13, fontWeight: 500, background: "transparent", color: view === key ? "#fff" : T.dim, borderLeft: "3px solid transparent", whiteSpace: "nowrap" }}>
-          <Icon size={15} strokeWidth={1.8} />
-          <span style={{ flex: 1 }}>{label}</span>
-        </button>
-      ))}
+    <nav className="sidebar-nav" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {groups.map(({ group, items: groupItems }) => {
+        const isOpen = group === activeGroup || !collapsed.has(group);
+        return (
+          <div key={group}>
+            <button onClick={() => toggleGroup(group)}
+              style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", display: "flex", alignItems: "center", width: "100%", gap: 6, padding: "10px 12px 4px", fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: group === activeGroup ? T.accent : T.dim }}>
+              <span style={{ flex: 1 }}>{group}</span>
+              <ChevronDown size={12} style={{ transform: isOpen ? "none" : "rotate(-90deg)", transition: "transform 0.15s", flexShrink: 0 }} />
+            </button>
+            {isOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {groupItems.map(({ key, label, icon: Icon }) => (
+                  <button key={key} onClick={() => { setView(key); setMobileNavOpen(false); }} className={`nav-item${view === key ? " active" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, border: "none", cursor: "pointer", textAlign: "left", fontSize: 13, fontWeight: 500, background: "transparent", color: view === key ? "#fff" : T.dim, borderLeft: "3px solid transparent", whiteSpace: "nowrap" }}>
+                    <Icon size={15} strokeWidth={1.8} aria-hidden="true" />
+                    <span style={{ flex: 1 }}>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </nav>
   );
   return (

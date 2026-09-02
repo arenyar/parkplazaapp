@@ -1,8 +1,37 @@
 import { useEffect, useState } from "react";
-import { Menu, Search, Bell, User } from "lucide-react";
+import { Menu, Search, Bell, User, Wifi, WifiOff } from "lucide-react";
 import { T } from "../theme.js";
 import { AvatarInitials } from "../components/ui.jsx";
 import { searchAcrossData } from "../lib/search.js";
+
+// Playbook talimatı (Faz 3): "son senkronizasyon zamanı ve bağlantı durumu"
+// — App.jsx'te Firestore snapshot metadata'sından (fromCache) hesaplanan
+// syncStatus'u okunabilir bir göreceli zamana çevirir.
+function relativeTimeTR(date) {
+  if (!date) return "henüz yok";
+  const sec = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (sec < 10) return "az önce";
+  if (sec < 60) return `${sec} sn önce`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} dk önce`;
+  const hr = Math.round(min / 60);
+  return `${hr} sa önce`;
+}
+function SyncIndicator({ syncStatus }) {
+  const [, forceTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => forceTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  if (!syncStatus) return null;
+  const { online, lastSyncAt } = syncStatus;
+  const Icon = online ? Wifi : WifiOff;
+  const color = online ? "#3FB37F" : "#E0B354";
+  const label = online ? `Bağlı · son senkron ${relativeTimeTR(lastSyncAt)}` : "Çevrimdışı — değişiklikler bağlantı gelince gönderilecek";
+  return (
+    <div title={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, whiteSpace: "nowrap" }}>
+      <Icon size={13} aria-hidden="true" />
+      <span className="sync-label">{online ? `Senkron: ${relativeTimeTR(lastSyncAt)}` : "Çevrimdışı"}</span>
+    </div>
+  );
+}
 
 const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 const DAYS_TR = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
@@ -17,7 +46,7 @@ function ResultRow({ title, sub, onClick }) {
   );
 }
 
-export function TopBar({ branding, search, setSearch, data, onResultClick, unreadCount, onOpenNotifications, currentUser, role, onLogout, onToggleNav, onOpenCommand }) {
+export function TopBar({ branding, search, setSearch, data, onResultClick, unreadCount, onOpenNotifications, syncStatus, currentUser, role, onLogout, onToggleNav, onOpenCommand }) {
   const [now, setNow] = useState(new Date());
   const [focused, setFocused] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -27,7 +56,7 @@ export function TopBar({ branding, search, setSearch, data, onResultClick, unrea
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
-      <button className="hamburger" onClick={onToggleNav} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer" }}><Menu size={20} /></button>
+      <button className="hamburger" onClick={onToggleNav} title="Menü" aria-label="Menüyü aç/kapat" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer" }}><Menu size={20} aria-hidden="true" /></button>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: 0.3 }}>OPERATIONS CENTER</div>
         <div style={{ fontSize: 12, color: T.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{branding.siteName} — {branding.tagline}</div>
@@ -50,12 +79,13 @@ export function TopBar({ branding, search, setSearch, data, onResultClick, unrea
           </div>
         )}
       </div>
-      <button onClick={onOpenCommand} title="Hızlı işlem paneli (Ctrl+K)" style={{ display: "flex", alignItems: "center", gap: 6, background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, padding: "7px 10px", color: T.dim, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+      <button onClick={onOpenCommand} title="Hızlı işlem paneli (Ctrl+K)" aria-label="Hızlı işlem panelini aç" style={{ display: "flex", alignItems: "center", gap: 6, background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, padding: "7px 10px", color: T.dim, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
         <span style={{ fontFamily: "ui-monospace, monospace" }}>⌘K</span>
       </button>
       <div style={{ fontSize: 12, color: T.dim, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{dateLabel}</div>
-      <button onClick={onOpenNotifications} title={unreadCount ? `${unreadCount} okunmamış bildirim` : "Bildirim yok"} style={{ position: "relative", width: 36, height: 36, borderRadius: 999, border: `1px solid ${T.line}`, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-        <Bell size={16} color={T.dim} />
+      <SyncIndicator syncStatus={syncStatus} />
+      <button onClick={onOpenNotifications} title={unreadCount ? `${unreadCount} okunmamış bildirim` : "Bildirim yok"} aria-label={unreadCount ? `Bildirimler, ${unreadCount} okunmamış` : "Bildirimler"} style={{ position: "relative", width: 36, height: 36, borderRadius: 999, border: `1px solid ${T.line}`, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+        <Bell size={16} color={T.dim} aria-hidden="true" />
         {unreadCount > 0 && <span style={{ position: "absolute", top: -4, right: -4, background: "#E2685A", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{unreadCount}</span>}
       </button>
       <div style={{ position: "relative" }}>

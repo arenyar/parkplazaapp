@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
 import { Plus, X, PenLine } from "lucide-react";
 import { T } from "../theme.js";
-import { PageHeader, Card, Button, Field, Input, TextArea } from "../components/ui.jsx";
+import { PageHeader, Card, Button, Field, Input, Select, TextArea } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
 import { MobileTaskList } from "../components/MobileTaskList.jsx";
 import { SignaturePad } from "../components/SignaturePad.jsx";
 import { fmtDateTime } from "../lib/format.js";
 import { MahalKontrol } from "./MahalKontrol.jsx";
+import { uploadDataUrl } from "../lib/storage.js";
+import StoredImage from "../components/StoredImage.jsx";
 
 const TABS = [
   { key: "devriye", label: "Devriye & Olaylar" },
@@ -57,25 +59,50 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (targetTab !== "mahal") onConsumeDeepLink();
   }, [deepLink]);
 
+  const [signing, setSigning] = useState(false);
   function updateSignature(i, patch) {
     setForm((f) => ({ ...f, signatures: f.signatures.map((s, idx) => (idx === i ? { ...s, ...patch } : s)) }));
   }
-  function save() {
+  // Kullanıcı teyidiyle bulunan risk: imzalar (SignaturePad'in ürettiği
+  // base64 PNG) daha önce ham haliyle doğrudan Firestore'a yazılıyordu —
+  // tüm uygulama state'i TEK dokümanda tutulduğundan (1 MB sınır), biriken
+  // tutanaklarla bu sınıra çarpma riski vardı. Artık kaydetmeden önce her
+  // imza Firebase Storage'a yüklenip (bkz. lib/storage.js uploadDataUrl)
+  // Firestore'a küçük bir URL yazılıyor — <img src=...> görüntüleme kodu
+  // değişmiyor, data: URL de https: URL de aynı şekilde çalışır.
+  async function save() {
     if (!form.description.trim()) return;
-    const incidents = [{ id: `i_${Date.now()}`, ...form, reportedBy: currentUser, at: new Date().toISOString() }, ...state.incidents];
+    setSigning(true);
+    let signatures = form.signatures;
+    try {
+      signatures = await Promise.all(form.signatures.map(async (s) => {
+        if (!s.signature || !s.signature.startsWith("data:")) return s;
+        try {
+          return { ...s, signature: await uploadDataUrl(s.signature, "imzalar") };
+        } catch (err) {
+          console.error("İmza yüklenemedi:", err);
+          return s;
+        }
+      }));
+    } finally {
+      setSigning(false);
+    }
+    const incidents = [{ id: `i_${Date.now()}`, ...form, signatures, reportedBy: currentUser, at: new Date().toISOString() }, ...state.incidents];
     updateState({ incidents });
     setForm(emptyIncidentForm());
     setFormOpen(false);
   }
 
+  const guardOptions = state.team.filter((t) => t.department === "Güvenlik");
   const deptTasks = state.tasks.filter((t) => t.department === "Güvenlik" && !t.archived);
   function nextTicketNo() { return Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1; }
   function startNewTask() { setTaskForm(emptyTask("Güvenlik", nextTicketNo())); setTaskFormOpen(true); }
   function startEditTask(t) { setTaskForm(t); setTaskFormOpen(true); }
+  // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
   function saveTask() {
     if (!taskForm.description.trim()) return;
     const id = taskForm.id || `t_${Date.now()}`;
-    const payload = { ...taskForm, id, department: "Güvenlik", createdAt: taskForm.createdAt || new Date().toISOString() };
+    const payload = { ...taskForm, id, department: "Güvenlik", createdAt: taskForm.createdAt || new Date().toISOString(), createdBy: taskForm.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
     const tasks = taskForm.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
     updateState({ tasks });
     setTaskFormOpen(false);
@@ -129,16 +156,30 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
                 İş bu tutanak tarafımızca tanzim edilerek imza altına alınmıştır. {form.tarih ? new Date(form.tarih).toLocaleDateString("tr-TR") : "…"}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 14 }}>
-                {form.signatures.map((s, i) => (
-                  <div key={i} style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 10 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: T.dim, textTransform: "uppercase", marginBottom: 6 }}>{s.role}</div>
-                    <Input placeholder="Adı Soyadı" value={s.name} onChange={(e) => updateSignature(i, { name: e.target.value })} style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }} />
-                    <SignaturePad value={s.signature} onChange={(val) => updateSignature(i, { signature: val })} height={90} />
-                  </div>
-                ))}
+                {form.signatures.map((s, i) => {
+                  const isKnown = guardOptions.some((t) => t.name === s.name);
+                  const manualMode = s.manual || (s.name && !isKnown);
+                  return (
+                    <div key={i} style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: T.dim, textTransform: "uppercase", marginBottom: 6 }}>{s.role}</div>
+                      <Select value={manualMode ? "__manual__" : s.name} onChange={(e) => {
+                        const val = e.target.value;
+                        updateSignature(i, val === "__manual__" ? { name: "", manual: true } : { name: val, manual: false });
+                      }} style={{ width: "100%", boxSizing: "border-box", marginBottom: manualMode ? 6 : 8 }}>
+                        <option value="">Personel seçin</option>
+                        {guardOptions.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                        <option value="__manual__">Listede yok — elle yaz</option>
+                      </Select>
+                      {manualMode && (
+                        <Input placeholder="Adı Soyadı" value={s.name} onChange={(e) => updateSignature(i, { name: e.target.value })} style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }} />
+                      )}
+                      <SignaturePad value={s.signature} onChange={(val) => updateSignature(i, { signature: val })} height={90} />
+                    </div>
+                  );
+                })}
               </div>
 
-              <div style={{ display: "flex", gap: 8 }}><Button onClick={save}>Kaydet</Button><Button variant="quiet" onClick={() => setFormOpen(false)}>Vazgeç</Button></div>
+              <div style={{ display: "flex", gap: 8 }}><Button onClick={save} disabled={signing}>{signing ? "İmzalar kaydediliyor…" : "Kaydet"}</Button><Button variant="quiet" onClick={() => setFormOpen(false)}>Vazgeç</Button></div>
             </Card>
           )}
           <div className="grid-2">
@@ -225,7 +266,7 @@ function IncidentReportView({ incident: i, onClose }) {
           {(i.signatures || []).map((s, idx) => (
             <div key={idx} style={{ border: "1px solid #E3DFD1", borderRadius: 10, padding: 10, textAlign: "center" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>{s.role}</div>
-              {s.signature ? <img src={s.signature} alt="İmza" style={{ width: "100%", height: 70, objectFit: "contain" }} /> : (
+              {s.signature ? <StoredImage src={s.signature} alt="İmza" style={{ width: "100%", height: 70, objectFit: "contain" }} /> : (
                 <div style={{ height: 70, display: "flex", alignItems: "center", justifyContent: "center", color: "#C7C4B4" }}><PenLine size={20} /></div>
               )}
               <div style={{ fontSize: 11.5, color: "#132A20", marginTop: 4, borderTop: "1px solid #E3DFD1", paddingTop: 4 }}>{s.name || "—"}</div>

@@ -184,7 +184,12 @@ function ControlCalendar({ state, onOpenFill }) {
 
   return (
     <div>
-      <Card style={{ marginBottom: 16 }}>
+      {/* Kullanıcı teyidiyle: "Kontrollerdeki takvimi küçük yap böyle kontrol
+          edilmiyor" — takvim eskiden sayfa genişliğine yayılıyordu (7 sütun
+          1fr, hiçbir max-width yoktu), geniş ekranda gün kutucukları dev
+          karelere dönüşüp kullanılamaz hale geliyordu. Artık tipik bir takvim
+          widget'ı gibi dar/sabit genişlikte. */}
+      <Card style={{ marginBottom: 16, maxWidth: 380 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button onClick={() => shiftMonth(-1)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 7, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: T.ink, cursor: "pointer" }}><ChevronLeft size={14} /></button>

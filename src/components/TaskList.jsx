@@ -32,8 +32,8 @@ export function TaskList({ tasks, onEdit, onDelete, pageSize = 20, emptyText = "
               <span style={{ background: `${T.accent}22`, color: T.accent, fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "3px 9px" }}>{t.status}</span>
               <span style={{ background: pr.bg, color: pr.fg, fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "3px 9px", textTransform: "uppercase" }}>{t.priority}</span>
               <SlaBadge task={t} />
-              {canWrite && <button onClick={() => onEdit(t)} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim }}><Pencil size={14} /></button>}
-              {canWrite && <button onClick={() => { if (window.confirm(`#${t.ticketNo} kaydını silmek istediğinize emin misiniz? Kayıt arşivlenecek, raporlarda görünmeye devam edecek.`)) onDelete(t.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#E2685A" }}><Trash2 size={14} /></button>}
+              {canWrite && <button onClick={() => onEdit(t)} title="Düzenle" aria-label={`#${t.ticketNo} kaydını düzenle`} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim }}><Pencil size={14} aria-hidden="true" /></button>}
+              {canWrite && <button onClick={() => { if (window.confirm(`#${t.ticketNo} kaydını silmek istediğinize emin misiniz? Kayıt arşivlenecek, raporlarda görünmeye devam edecek.`)) onDelete(t.id); }} title="Sil" aria-label={`#${t.ticketNo} kaydını sil`} style={{ background: "none", border: "none", cursor: "pointer", color: "#E2685A" }}><Trash2 size={14} aria-hidden="true" /></button>}
             </div>
           );
         })}

@@ -7,12 +7,14 @@ import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask, TASK_STATUSES, TASK_PRIORITIES } from "../components/TaskForm.jsx";
 import { TALEP_TYPES } from "../mockData.js";
 import { buildFirmalar } from "../piramitData.js";
+import { uploadPhoto } from "../lib/storage.js";
+import StoredImage from "../components/StoredImage.jsx";
 
 const STATUSES = ["Yapılacak", "Üzr. Çalışılıyor", "Tamamlandı", "İptal"];
 
 const TABS = [
-  { key: "akis", label: "Görev Akışı" },
   { key: "talep", label: "Talep / Şikayet" },
+  { key: "akis", label: "Görev Akışı" },
 ];
 
 // Departman bazlı "Süreç / arıza tipi" seçenekleri — Bakım/Görev kayıtlarında
@@ -41,7 +43,7 @@ function emptyRequest(department, currentUser) {
     id: null, company: "", location: "", type: "Talep", department: dept,
     processType: PROCESS_TYPES_BY_DEPARTMENT[dept]?.[0] || "", priority: "Orta",
     requester: currentUser || "", assignee: "", startDate: todayISO(), dueDate: "",
-    status: "Yapılacak", description: "", hasPhoto: false,
+    status: "Yapılacak", description: "", hasPhoto: false, photoUrl: null, photoFile: null,
     rootCause: "", resolution: "", closedDate: "",
   };
 }
@@ -80,7 +82,7 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
       id: t.id, company: t.company || "", location: t.location || "", type: t.issueType, department: t.department,
       processType: t.processType || PROCESS_TYPES_BY_DEPARTMENT[t.department]?.[0] || "", priority: t.priority,
       requester: t.requester || "", assignee: t.assignee || "", startDate: t.startDate || todayISO(), dueDate: t.dueDate || "",
-      status: t.status, description: t.description, hasPhoto: !!t.hasPhoto,
+      status: t.status, description: t.description, hasPhoto: !!t.hasPhoto, photoUrl: t.photoUrl || null, photoFile: null,
       rootCause: t.rootCause || "", resolution: t.resolution || "", closedDate: t.closedDate || "",
     });
     setClosureOpen(!!(t.rootCause || t.resolution || t.closedDate));
@@ -95,24 +97,47 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   function onDepartmentChange(dept) {
     setForm((f) => ({ ...f, department: dept, processType: PROCESS_TYPES_BY_DEPARTMENT[dept]?.[0] || "" }));
   }
+  const [uploading, setUploading] = useState(false);
   function handlePhoto(e) {
-    if (e.target.files?.[0]) setForm((f) => ({ ...f, hasPhoto: true }));
+    const file = e.target.files?.[0];
+    if (file) setForm((f) => ({ ...f, photoFile: file, photoPreviewUrl: URL.createObjectURL(file), hasPhoto: true }));
   }
 
-  function save() {
+  // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
+  // — bkz. lib/storage.js uploadPhoto. Düzenlemede yeni fotoğraf SEÇMEDİYSE
+  // mevcut form.photoUrl (startEdit'te t.photoUrl'den geliyor) korunur.
+  async function save() {
     if (!form.requester.trim() || !form.description.trim()) return;
+    if (form.status === "Tamamlandı" && !form.resolution.trim()) {
+      setClosureOpen(true);
+      alert("Tamamlandı olarak kaydetmeden önce ne yapıldığını (Alınan Önlem / Çözüm) açıklayın.");
+      return;
+    }
+    let photoUrl = form.photoUrl || null;
+    if (form.photoFile) {
+      setUploading(true);
+      try {
+        photoUrl = await uploadPhoto(form.photoFile, "gorev-fotograflari");
+      } catch (err) {
+        console.error("Fotoğraf yüklenemedi:", err);
+        alert("Fotoğraf yüklenemedi (kayıt yine de kaydedilecek): " + err.message);
+      } finally {
+        setUploading(false);
+      }
+    }
     const payload = {
       company: form.company, location: form.location, issueType: form.type, department: form.department,
       processType: form.processType, priority: form.priority, requester: form.requester, assignee: form.assignee,
       startDate: form.startDate, dueDate: form.dueDate, status: form.status, description: form.description,
-      hasPhoto: form.hasPhoto, rootCause: form.rootCause, resolution: form.resolution, closedDate: form.closedDate,
+      hasPhoto: form.hasPhoto || !!photoUrl, photoUrl, rootCause: form.rootCause, resolution: form.resolution, closedDate: form.closedDate,
     };
+    // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
     if (form.id) {
-      const tasks = state.tasks.map((t) => (t.id === form.id ? { ...t, ...payload } : t));
+      const tasks = state.tasks.map((t) => (t.id === form.id ? { ...t, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser } : t));
       updateState({ tasks });
     } else {
       const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-      const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), ...payload };
+      const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...payload };
       updateState({ tasks: [...state.tasks, task] });
     }
     setFormOpen(false);
@@ -161,7 +186,13 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
             </Field>
             <Field label="Başlama Tarihi"><Input type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} /></Field>
             <Field label="Termin Tarihi"><Input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} /></Field>
-            <Field label="Durum"><Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>{TASK_STATUSES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+            <Field label="Durum">
+              <Select value={form.status} onChange={(e) => {
+                const status = e.target.value;
+                setForm((f) => ({ ...f, status }));
+                if (status === "Tamamlandı") setClosureOpen(true);
+              }}>{TASK_STATUSES.map((s) => <option key={s}>{s}</option>)}</Select>
+            </Field>
             <Field label="ISO Süreç No"><Input value={ISO_PROCESS_NO_BY_DEPARTMENT[form.department] || ""} disabled style={{ opacity: 0.6 }} /></Field>
           </div>
           <Field label="Açıklama" required><TextArea style={{ width: "100%", minHeight: 60 }} placeholder="Talebi, konumu ve beklenen sonucu açıklayın." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></Field>
@@ -173,6 +204,11 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
               {form.hasPhoto ? "Fotoğraf seçildi ✓" : "Fotoğraf çek / seç"}
               <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: "none" }} />
             </label>
+            {form.photoPreviewUrl ? (
+              <img src={form.photoPreviewUrl} alt="Önizleme" style={{ marginTop: 8, width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 8 }} />
+            ) : form.photoUrl ? (
+              <StoredImage src={form.photoUrl} alt="Önizleme" style={{ marginTop: 8, width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 8 }} />
+            ) : null}
           </div>
 
           <button onClick={() => setClosureOpen((s) => !s)} style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: T.dim, fontSize: 12, fontWeight: 700, marginBottom: closureOpen ? 10 : 16 }}>
@@ -182,13 +218,15 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
           {closureOpen && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10, marginBottom: 6 }}>
               <Field label="Kök Neden"><TextArea style={{ width: "100%", minHeight: 50 }} value={form.rootCause} onChange={(e) => setForm((f) => ({ ...f, rootCause: e.target.value }))} /></Field>
-              <Field label="Alınan Önlem / Çözüm"><TextArea style={{ width: "100%", minHeight: 50 }} value={form.resolution} onChange={(e) => setForm((f) => ({ ...f, resolution: e.target.value }))} /></Field>
+              <Field label="Alınan Önlem / Çözüm" required={form.status === "Tamamlandı"}>
+                <TextArea style={{ width: "100%", minHeight: 50 }} placeholder={form.status === "Tamamlandı" ? "Tamamlandı ama ne yapıldı? Açıklayın." : ""} value={form.resolution} onChange={(e) => setForm((f) => ({ ...f, resolution: e.target.value }))} />
+              </Field>
               <Field label="Kapanış Tarihi"><Input type="date" value={form.closedDate} onChange={(e) => setForm((f) => ({ ...f, closedDate: e.target.value }))} /></Field>
             </div>
           )}
 
           <div style={{ display: "flex", gap: 8 }}>
-            <Button onClick={save}>{form.id ? "Kaydet" : "Kaydı Oluştur"}</Button>
+            <Button onClick={save} disabled={uploading}>{uploading ? "Fotoğraf yükleniyor…" : form.id ? "Kaydet" : "Kaydı Oluştur"}</Button>
             <Button variant="quiet" onClick={() => setFormOpen(false)}>Vazgeç</Button>
           </div>
         </Card>
@@ -236,7 +274,7 @@ function StatusColumn({ status, items, onOpenTask }) {
 // erişim noktası bu genel form — Gorevler.jsx'teki pendingAction deseniyle
 // birebir aynı.
 export function Operasyonlar({ state, updateState, currentUser, onOpenTask, pendingAction, onConsumePending, canWrite = true }) {
-  const [tab, setTab] = useState("akis");
+  const [tab, setTab] = useState("talep");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
 
@@ -252,10 +290,11 @@ export function Operasyonlar({ state, updateState, currentUser, onOpenTask, pend
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAction]);
 
+  // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
   function saveTask() {
     if (!form.description.trim()) return;
     const id = form.id || `t_${Date.now()}`;
-    const payload = { ...form, id, createdAt: form.createdAt || new Date().toISOString() };
+    const payload = { ...form, id, createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
     const tasks = form.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
     updateState({ tasks });
     setFormOpen(false);
@@ -264,7 +303,7 @@ export function Operasyonlar({ state, updateState, currentUser, onOpenTask, pend
   return (
     <div>
       <div style={{ background: "#0B1420", borderRadius: 14, padding: "16px 20px 18px", marginBottom: 18 }}>
-        <h1 style={{ margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: "#fff" }}>Operasyonlar</h1>
+        <h1 style={{ margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: "#fff" }}>Talep / Şikayet</h1>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {TABS.map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}

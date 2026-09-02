@@ -6,12 +6,17 @@ import { MobileBottomNav } from "./layout/MobileBottomNav.jsx";
 import { CommandCenter } from "./layout/CommandCenter.jsx";
 import { NotificationsSheet } from "./layout/NotificationsSheet.jsx";
 import { QrScannerModal } from "./layout/QrScannerModal.jsx";
+import { ToastHost } from "./components/ToastHost.jsx";
+import { showToast } from "./lib/toast.js";
 import { makeInitialState, migrateLegacyState } from "./mockData.js";
 import { subscribeState, saveState, authListen, logout as fbLogout } from "./firebase.js";
 import { useIsMobile } from "./lib/useIsMobile.js";
+import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
 import { T } from "./theme.js";
 
 import { Login } from "./pages/Login.jsx";
+import { MobileLogin } from "./pages/MobileLogin.jsx";
+import { MobileApp } from "./MobileApp.jsx";
 import { Dashboard } from "./pages/Dashboard.jsx";
 import { Operasyonlar } from "./pages/Operasyonlar.jsx";
 import { KatPlani } from "./pages/KatPlani.jsx";
@@ -31,8 +36,9 @@ import { Ayarlar } from "./pages/Ayarlar.jsx";
 // Mahal Kontrol QR'ı (bkz. MahalKontrol.jsx QrModal) hangi departman
 // sayfasına düşer — hem uygulama içi kamera taramasında (handleQrDecoded)
 // hem fiziksel etiketin telefonun kendi kamerasıyla doğrudan URL açmasında
-// (bkz. aşağıdaki mount effect'i) AYNI eşleme kullanılır.
-const DEPARTMENT_VIEW = { "Teknik": "bakim", "Güvenlik": "guvenlik", "Temizlik": "temizlik" };
+// (bkz. aşağıdaki mount effect'i) AYNI eşleme kullanılır (bkz.
+// lib/departmentView.js — MobileApp.jsx ile paylaşılıyor, dairesel import
+// olmasın diye ayrı dosyada).
 
 export default function App() {
   const [state, setState] = useState(makeInitialState);
@@ -46,6 +52,30 @@ export default function App() {
   const [pendingTaskAction, setPendingTaskAction] = useState(null);
   const [mahalDeepLink, setMahalDeepLink] = useState(null);
   const [qrLinkPending, setQrLinkPending] = useState(false);
+  // Kullanıcı teyidiyle: "mobil arayüz webden özel olmalı... farklı bir link
+  // ile mobil uygulamaya giriş yapıyor gibi olmalı" ve devamında "telefon
+  // tarayıcısından giriş yaptığında bu mobil kısım otomatik gelmeli". Ayrı
+  // bir router kütüphanesi eklemeden (yok, netlify.toml zaten /* →
+  // /index.html yönlendiriyor) — aşağıdaki tüm hook'lar (state/auth/
+  // Firestore aboneliği) DEĞİŞMEDEN ikisi için de çalışır, sadece son render
+  // kararı değişir. Üç durum: (1) /mobil — QR etiketleri/paylaşılan link,
+  // her zaman mobil kabuk; (2) düz "/" bir TELEFONDAN açılırsa (dar
+  // viewport) — personel her gün siteyi elle /mobil yazmadan, sadece siteyi
+  // açarak mobil deneyime düşsün diye otomatik mobil kabuk; (3) "/" bir
+  // bilgisayardan açılırsa — mevcut masaüstü Operations Center. ?masaustu=1
+  // bu otomatik yönlendirmeyi bilinçli olarak atlamak için (bkz.
+  // MobileMoreSheet "Masaüstü Sürümüne Geç" — o link olmasa telefondan
+  // masaüstüne geçiş imkansız olurdu, hemen tekrar mobile döner). Mount'ta
+  // bir kez okunur (SPA içi bir navigasyon yok, giriş noktası sabit;
+  // viewport ileride daralsa/genişlese bile oturum ortasında kabuk
+  // değişmez — bu useIsMobile()'ın CANLI, reaktif halinden BİLEREK farklı).
+  const [isMobileRoute] = useState(() => {
+    const path = window.location.pathname;
+    if (path.startsWith("/mobil")) return true;
+    const forcedDesktop = new URLSearchParams(window.location.search).get("masaustu") === "1";
+    if (path === "/" && !forcedDesktop && window.innerWidth <= 900) return true;
+    return false;
+  });
   // Kullanıcı teyidiyle: "Mobil uygulama son kullanıcının sahada veri
   // girdiği alan olmalı burda formlar üzerinde değişiklik yapmak yada
   // silmek olmamalı" — Teknik/Güvenlik/Temizlik sayfalarına, admin/tanım
@@ -77,10 +107,21 @@ export default function App() {
   // ilk (mock) haline döner — bir sonraki kullanıcı öncekinin verisini bir an
   // için bile görmez.
   const seededRef = useRef(false);
+  // Playbook talimatı (Faz 3): "son senkronizasyon zamanı ve bağlantı
+  // durumu" — Firestore'un kendi snapshot metadata'sı (fromCache) en
+  // güvenilir kaynak: sunucudan doğrulanmış her snapshot'ta lastSyncAt
+  // güncellenir, önbellekten (çevrimdışı) geldiğinde online=false olur.
+  const [syncStatus, setSyncStatus] = useState({ online: true, lastSyncAt: null });
+  // Geçerli QR'ın "eşleşen mahal bulunamadı" hatasını, henüz Firestore'un
+  // GERÇEK verisi gelmeden (state hâlâ makeInitialState() mock seed'iyken)
+  // yanlışlıkla göstermemek için — bkz. pendingQr effect'i aşağıda.
+  const [dataReady, setDataReady] = useState(false);
   useEffect(() => {
     if (!fbUser) { setState(makeInitialState()); return; }
-    const unsub = subscribeState((remote) => {
+    const unsub = subscribeState((remote, meta) => {
+      setSyncStatus((s) => ({ online: !meta.fromCache, lastSyncAt: meta.fromCache ? s.lastSyncAt : new Date() }));
       if (remote) {
+        setDataReady(true);
         // Firestore'daki veri bu personel/kullanıcı ayrımından önce
         // kaydedilmiş olabilir (users hiç yok, eski team şekli) — gerçek
         // veriyi kaybetmeden şekli güncelleyip geri yazıyoruz (bkz.
@@ -151,14 +192,23 @@ export default function App() {
     } catch { /* geçersiz/parametresiz URL — normal açılış */ }
   }, []);
   useEffect(() => {
-    if (!pendingQr) return;
+    if (!pendingQr || !dataReady) return;
     const point = state.mahalPoints.find((p) => p.id === pendingQr.mahalId);
-    if (!point) return;
+    if (!point) {
+      // Playbook talimatı: "QR geçersizse kullanıcıya neden anlaşılmadığı ve
+      // alternatif olarak manuel seçim yapabileceği gösterilmeli" — önceden
+      // burada sessizce hiçbir şey olmuyordu (deep-link hiç kurulmuyordu),
+      // kullanıcı giriş ekranını görüp sebebini anlamadan Ana Sayfa'ya
+      // düşüyordu.
+      showToast("Bu QR koduna ait bir mahal bulunamadı — Kontroller ekranından manuel seçebilirsiniz.", "error");
+      setPendingQr(null);
+      return;
+    }
     setMahalDeepLink({ pointId: pendingQr.mahalId, department: point.department, floorLabel: pendingQr.floorLabel });
     if (DEPARTMENT_VIEW[point.department]) setView(DEPARTMENT_VIEW[point.department]);
     setQrLinkPending(true);
     setPendingQr(null);
-  }, [pendingQr, state.mahalPoints]);
+  }, [pendingQr, dataReady, state.mahalPoints]);
 
   function goTo(key) { setView(key); setMobileNavOpen(false); }
   // Ana Sayfa'daki departman kısayolları (bkz. Dashboard.jsx DEPT_SHORTCUTS)
@@ -207,11 +257,16 @@ export default function App() {
           if (DEPARTMENT_VIEW[point.department]) setView(DEPARTMENT_VIEW[point.department]);
           return;
         }
+        // Playbook talimatı: geçersiz QR'da neden anlaşılmalı + manuel seçim
+        // alternatifi sunulmalı — bu mahal etiketi silinmiş/taşınmış olabilir.
+        showToast("Bu QR'a ait mahal artık tanımlı değil — Kontroller ekranından manuel seçebilirsiniz.", "error");
+        setView("kontroller");
+        return;
       }
     } catch { /* metin URL değil — varlık eşleşmesine devam */ }
     const asset = state.assets.find((a) => text.toLowerCase().includes(a.name.toLowerCase()) || a.id === text);
     if (asset) { setSelectedAssetId(asset.id); setView("varliklar"); }
-    else window.alert(`QR okundu: "${text}" — eşleşen bir varlık bulunamadı.`);
+    else showToast(`QR okundu: "${text}" — eşleşen bir varlık bulunamadı.`, "error");
   }
 
   // Üç durum: fbUser henüz belirlenmedi (kısa an, boş ekran — Login'in
@@ -220,7 +275,9 @@ export default function App() {
   // — kısa "Yükleniyor" ekranı, Login DEĞİL, çünkü giriş zaten başarılı oldu).
   if (fbUser === undefined) return <div style={{ minHeight: "100vh", background: T.bg }} />;
   if (!fbUser) {
-    return <Login branding={state.branding} onLoggedIn={() => { if (!qrLinkPending) setView("dashboard"); }} />;
+    return isMobileRoute
+      ? <MobileLogin branding={state.branding} onLoggedIn={() => { if (!qrLinkPending) setView("dashboard"); }} />
+      : <Login branding={state.branding} onLoggedIn={() => { if (!qrLinkPending) setView("dashboard"); }} />;
   }
   if (!currentAccount || !currentUser) {
     return <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13 }}>Yükleniyor…</div>;
@@ -244,6 +301,15 @@ export default function App() {
   const activeView = allowedScreens.includes(view) ? view : (allowedScreens[0] || "dashboard");
   const canWrite = (screenKey) => !!permissions[screenKey]?.write;
 
+  if (isMobileRoute) {
+    return (
+      <MobileApp state={state} updateState={updateState} currentUser={currentUser} currentAccount={currentAccount}
+        role={role} canWrite={canWrite} branding={state.branding} onLogout={() => fbLogout()}
+        qrDeepLink={mahalDeepLink} onConsumeQrDeepLink={() => setMahalDeepLink(null)}
+        scannerOpen={scannerOpen} setScannerOpen={setScannerOpen} handleQrDecoded={handleQrDecoded} />
+    );
+  }
+
   const pages = {
     dashboard: <Dashboard state={state} role={role} onGoTo={goTo} onNewTask={newTask} onScan={() => setScannerOpen(true)} onOpenAlert={handleAlertClick} onShortcut={goToDeptShortcut} />,
     operasyonlar: <Operasyonlar state={state} updateState={updateState} currentUser={currentUser.name} onOpenTask={editTask} pendingAction={pendingTaskAction} onConsumePending={() => setPendingTaskAction(null)} canWrite={canWrite("operasyonlar")} />,
@@ -265,6 +331,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <GlobalStyle />
+      <ToastHost />
       {!currentAccount.mobileAccess && (
         <div className="mobile-block-overlay">
           <div style={{ fontSize: 15, fontWeight: 700, color: T.ink, marginBottom: 6 }}>Mobil erişiminiz yok</div>
@@ -275,7 +342,7 @@ export default function App() {
         mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen} />
       <main className="main-content" style={{ flex: 1, padding: "24px 30px", minWidth: 0 }}>
         <TopBar branding={state.branding} search={search} setSearch={setSearch} data={searchData} onResultClick={handleResultClick}
-          unreadCount={unreadCount} onOpenNotifications={() => setNotificationsOpen(true)}
+          unreadCount={unreadCount} onOpenNotifications={() => setNotificationsOpen(true)} syncStatus={syncStatus}
           currentUser={currentUser.name} role={role} onLogout={() => fbLogout()}
           onToggleNav={() => setMobileNavOpen((s) => !s)} onOpenCommand={() => setCommandOpen(true)} />
         {allowedScreens.includes(view) ? pages[view] : (
@@ -283,8 +350,8 @@ export default function App() {
         )}
       </main>
 
-      <MobileBottomNav view={view} setView={goTo} unreadCount={unreadCount}
-        onScan={() => setScannerOpen(true)} onAlerts={() => setNotificationsOpen(true)} onMore={() => setMobileNavOpen(true)} />
+      <MobileBottomNav view={view} setView={goTo}
+        onScan={() => setScannerOpen(true)} onMore={() => setMobileNavOpen(true)} />
 
       {commandOpen && (
         <CommandCenter onClose={() => { setCommandOpen(false); setSearch(""); }} onGoTo={goTo} onNewTask={newTask} onScan={() => setScannerOpen(true)}

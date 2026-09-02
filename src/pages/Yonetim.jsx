@@ -6,6 +6,8 @@ import { fmtDate } from "../lib/format.js";
 import { ALL_PERMISSION_SCREENS, buildPermissions, DEFAULT_PASSWORD } from "../mockData.js";
 import { NAV_ITEMS } from "../layout/navItems.js";
 import { createAuthAccount, resetPasswordEmail } from "../firebase.js";
+import { showToast } from "../lib/toast.js";
+import { authErrorMessage } from "../lib/authErrors.js";
 
 function empty(departments) { return { id: null, name: "", role: "", department: departments[0], email: "", phone: "", startDate: "" }; }
 
@@ -130,7 +132,7 @@ export function Yonetim({ state, updateState, canWrite = true }) {
       await createAuthAccount(personnel.email, DEFAULT_PASSWORD);
     } catch (err) {
       if (err.code !== "auth/email-already-in-use") {
-        window.alert(`Giriş hesabı açılamadı: ${err.message || err.code}`);
+        showToast(`Giriş hesabı açılamadı: ${authErrorMessage(err.code)}`, "error");
         return;
       }
       // E-posta zaten Firebase Auth'ta varsa (ör. daha önce açılmış, sadece
@@ -139,6 +141,33 @@ export function Yonetim({ state, updateState, canWrite = true }) {
     const account = { id: `usr_${Date.now()}`, personnelId: personnel.id, username: personnel.email, mobileAccess: true, permissions: buildPermissions(DEFAULT_SCREENS_FOR(state.departments, personnel)) };
     updateState({ users: [...state.users, account] });
     setEditingAccountFor(personnel.id);
+    showToast(`${personnel.name} için giriş hesabı açıldı.`, "success");
+  }
+  // Kullanıcı teyidiyle bulunan hata: "e-posta eklediğimde kullanıcı
+  // firebase bağlanmıyor" — kök neden: personel formundaki `save()` sadece
+  // state.team'i günceller, personelin ZATEN bir giriş hesabı (state.users)
+  // varsa o hesabın `username`'i (Firebase Auth'a bağlı e-posta) hiç
+  // güncellenmiyordu — personel kartında yeni e-posta görünse de giriş
+  // hesabı hâlâ ESKİ e-postaya bağlı kalıyordu, "Kullanıcı Aç" butonu da bir
+  // daha hiç görünmüyordu (account varken hep "Yetkileri Düzenle" gösterilir).
+  // İstemci taraflı Firebase Auth SDK'sı BAŞKA bir kullanıcının hesabının
+  // e-postasını değiştirmeye/silmeye izin vermiyor (sadece oturum açık olan
+  // kendi hesabı için) — bu yüzden "taşıma" aslında YENİ bir Auth hesabı
+  // açıp state.users kaydını ona bağlamak, eski (artık hiçbir state.users
+  // kaydının işaret etmediği için giriş yapılamaz durumdaki) hesabı kendi
+  // haline bırakmak şeklinde çözülüyor.
+  async function relinkAccountEmail(personnel, account) {
+    if (!window.confirm(`"${personnel.name}" için giriş hesabı yeni e-postaya (${personnel.email}) taşınsın mı? Yeni bir giriş hesabı açılacak, başlangıç şifresi varsayılana dönecek (personel "Şifremi unuttum" ile kendi şifresini seçebilir).`)) return;
+    try {
+      await createAuthAccount(personnel.email, DEFAULT_PASSWORD);
+    } catch (err) {
+      if (err.code !== "auth/email-already-in-use") {
+        showToast(`Giriş hesabı taşınamadı: ${authErrorMessage(err.code)}`, "error");
+        return;
+      }
+    }
+    updateState({ users: state.users.map((u) => (u.id === account.id ? { ...u, username: personnel.email } : u)) });
+    showToast(`${personnel.name} için giriş hesabı ${personnel.email} adresine taşındı.`, "success");
   }
   function saveAccount(personnelId, patch) {
     updateState({ users: state.users.map((u) => (u.personnelId === personnelId ? { ...u, ...patch } : u)) });
@@ -147,7 +176,9 @@ export function Yonetim({ state, updateState, canWrite = true }) {
   function resetPassword(personnelId) {
     const account = state.users.find((u) => u.personnelId === personnelId);
     if (!account) return;
-    resetPasswordEmail(account.username).catch((err) => window.alert(`E-posta gönderilemedi: ${err.message || err.code}`));
+    resetPasswordEmail(account.username)
+      .then(() => showToast(`Şifre sıfırlama e-postası ${account.username} adresine gönderildi.`, "success"))
+      .catch((err) => showToast(`E-posta gönderilemedi: ${authErrorMessage(err.code)}`, "error"));
   }
 
   return (
@@ -173,6 +204,7 @@ export function Yonetim({ state, updateState, canWrite = true }) {
           <DeptSection key={dept} dept={dept} count={members.length}>
             {members.map((t) => {
               const account = state.users.find((u) => u.personnelId === t.id);
+              const emailMismatch = account && t.email && account.username !== t.email;
               return (
                 <div key={t.id}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: `1px solid ${T.line}` }}>
@@ -184,9 +216,16 @@ export function Yonetim({ state, updateState, canWrite = true }) {
                         {t.phone || "telefon yok"} · İşe giriş: {t.startDate ? fmtDate(t.startDate) : "—"}
                         {account ? <span style={{ color: T.accent, fontWeight: 600 }}> · Kullanıcı hesabı var</span> : <span style={{ color: "#E0B354", fontWeight: 600 }}> · Giriş hesabı yok</span>}
                       </div>
+                      {emailMismatch && (
+                        <div style={{ fontSize: 10.5, color: "#DC5A34", fontWeight: 600, marginTop: 2 }}>
+                          ⚠ Giriş hesabı hâlâ eski e-postaya bağlı ({account.username}) — personel yeni e-postayla ({t.email}) giriş yapamaz.
+                        </div>
+                      )}
                     </div>
                     {canWrite && (
-                      account ? (
+                      emailMismatch ? (
+                        <Button variant="ghost" icon={ShieldCheck} onClick={() => relinkAccountEmail(t, account)}>Hesabı Yeni E-postaya Taşı</Button>
+                      ) : account ? (
                         <Button variant="ghost" icon={ShieldCheck} onClick={() => setEditingAccountFor(editingAccountFor === t.id ? null : t.id)}>Yetkileri Düzenle</Button>
                       ) : (
                         <Button variant="ghost" icon={ShieldCheck} onClick={() => openUser(t)}>Kullanıcı Aç</Button>

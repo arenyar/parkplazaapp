@@ -45,10 +45,13 @@ export function Teknik({ state, updateState, currentUser, deepLink, onConsumeDee
   function nextTicketNo() { return Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1; }
   function startNew() { setForm(emptyTask("Teknik", nextTicketNo())); setFormOpen(true); }
   function startEdit(t) { setForm(t); setFormOpen(true); }
+  // updatedBy/updatedAt — playbook talimatı (Faz 9): "Denetim izi için en
+  // azından updatedBy, updatedAt... tasarla" — kim, ne zaman değiştirdi
+  // izlenebilir olsun diye (bkz. aynı desen: archivedBy/archivedAt).
   function save() {
     if (!form.description.trim()) return;
     const id = form.id || `t_${Date.now()}`;
-    const payload = { ...form, id, department: "Teknik", createdAt: form.createdAt || new Date().toISOString() };
+    const payload = { ...form, id, department: "Teknik", createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
     const tasks = form.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
     updateState({ tasks });
     setFormOpen(false);
