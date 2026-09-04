@@ -104,14 +104,14 @@ function ItemsTab({ state, updateState, canWrite }) {
   const leafCategories = categories.filter((c) => c.isLeaf);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ name: "", categoryId: "", unit: "adet", quantity: "", minQuantity: "" });
+  const [form, setForm] = useState({ name: "", categoryId: "", unit: "adet", quantity: "", minQuantity: "", price: "" });
   const [categoryFilter, setCategoryFilter] = useState("");
 
-  function startNew() { setEditingId(null); setForm({ name: "", categoryId: leafCategories[0]?.id || "", unit: "adet", quantity: "", minQuantity: "" }); setFormOpen(true); }
-  function startEdit(it) { setEditingId(it.id); setForm({ name: it.name, categoryId: it.categoryId, unit: it.unit, quantity: String(it.quantity ?? ""), minQuantity: String(it.minQuantity ?? "") }); setFormOpen(true); }
+  function startNew() { setEditingId(null); setForm({ name: "", categoryId: leafCategories[0]?.id || "", unit: "adet", quantity: "", minQuantity: "", price: "" }); setFormOpen(true); }
+  function startEdit(it) { setEditingId(it.id); setForm({ name: it.name, categoryId: it.categoryId, unit: it.unit, quantity: String(it.quantity ?? ""), minQuantity: String(it.minQuantity ?? ""), price: String(it.price ?? "") }); setFormOpen(true); }
   function save() {
     if (!form.name.trim() || !form.categoryId) return;
-    const payload = { name: form.name.trim(), categoryId: form.categoryId, unit: form.unit, quantity: form.quantity === "" ? 0 : Number(form.quantity), minQuantity: form.minQuantity === "" ? 0 : Number(form.minQuantity) };
+    const payload = { name: form.name.trim(), categoryId: form.categoryId, unit: form.unit, quantity: form.quantity === "" ? 0 : Number(form.quantity), minQuantity: form.minQuantity === "" ? 0 : Number(form.minQuantity), price: form.price === "" ? 0 : Number(form.price) };
     if (editingId) updateState({ stockItems: items.map((it) => (it.id === editingId ? { ...it, ...payload } : it)) });
     else updateState({ stockItems: [...items, { id: `sti_${Date.now()}`, ...payload }] });
     setFormOpen(false);
@@ -154,6 +154,7 @@ function ItemsTab({ state, updateState, canWrite }) {
               </Select>
             </Field>
             <Field label="Miktar"><Input type="number" value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} /></Field>
+            <Field label="Birim Fiyat (₺, opsiyonel)"><Input type="number" min="0" step="0.01" value={form.price} onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))} placeholder="Maliyet raporunda kullanılır" /></Field>
             <Field label="Kritik Seviye (opsiyonel)"><Input type="number" value={form.minQuantity} onChange={(e) => setForm((f) => ({ ...f, minQuantity: e.target.value }))} placeholder="Bu seviyenin altında uyarı gösterilir" /></Field>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -176,7 +177,10 @@ function ItemsTab({ state, updateState, canWrite }) {
                 </div>
                 <div style={{ fontSize: 11, color: T.dim, marginTop: 2 }}>{categoryPath(categories, it.categoryId)}</div>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: low ? "#DC5A34" : T.ink, flexShrink: 0 }}>{it.quantity} {it.unit}</div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: low ? "#DC5A34" : T.ink }}>{it.quantity} {it.unit}</div>
+                {it.price > 0 && <div style={{ fontSize: 10.5, color: T.dim, marginTop: 1 }}>{it.price.toLocaleString("tr-TR")} ₺/{it.unit}</div>}
+              </div>
               {canWrite && (
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                   <button onClick={() => startEdit(it)} title="Düzenle" style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 7, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: T.dim }}><Pencil size={13} /></button>
@@ -204,7 +208,10 @@ function MovementsTab({ state }) {
         {movements.length === 0 && <p style={{ margin: 0, padding: 16, fontSize: 12.5, color: T.dim }}>Henüz malzeme kullanımı kaydedilmedi.</p>}
         {movements.map((m, i) => (
           <div key={m.id} style={{ padding: "10px 16px", borderBottom: i < movements.length - 1 ? `1px solid ${T.line}` : "none" }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{itemName(m.itemId)} — {m.quantity} adet kullanıldı</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span>{itemName(m.itemId)} — {m.quantity} adet kullanıldı</span>
+              {m.totalCost > 0 && <span style={{ color: T.dim, flexShrink: 0 }}>{m.totalCost.toLocaleString("tr-TR")} ₺</span>}
+            </div>
             <div style={{ fontSize: 11, color: T.dim, marginTop: 2 }}>
               {m.taskTicketNo ? `#${m.taskTicketNo} — ${m.taskDescription}` : "—"} · {m.by} · {fmtDateTime(m.at)}
             </div>

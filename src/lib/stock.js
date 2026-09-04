@@ -29,6 +29,11 @@ export function categoryPath(categories, categoryId) {
 // hareket kaydı (STOCK_MOVEMENTS) açılır — "hangi bakımda ne kullanıldı"
 // ayrı bir sorgu icat edilmeden buradan izlenebilir. Negatif stoğa
 // düşürmüyor (Math.max(0, ...)) — eksi stok, sahada kafa karıştırıcı olurdu.
+// Kullanıcı teyidiyle: "malzeme fiyatlarınıda ekleyeceğimden maliyette
+// çıkar" — birim fiyat, hareket ANINDA (stockItems'taki güncel `price`)
+// hareket kaydına DA yazılır (unitPrice/totalCost). Böylece kalemin fiyatı
+// sonradan değişse bile geçmiş hareketlerin maliyeti (dolayısıyla rapor)
+// o günkü fiyatla doğru kalır — raporda tekrar item.price'a bakılmaz.
 export function consumeStockPatch(state, materialsUsed, task, personName) {
   if (!materialsUsed || materialsUsed.length === 0) return {};
   let stockItems = state.stockItems || [];
@@ -36,10 +41,13 @@ export function consumeStockPatch(state, materialsUsed, task, personName) {
   materialsUsed.forEach(({ itemId, quantity }) => {
     const qty = Number(quantity);
     if (!itemId || !qty || qty <= 0) return;
+    const item = stockItems.find((it) => it.id === itemId);
+    const unitPrice = Number(item?.price) || 0;
     stockItems = stockItems.map((it) => (it.id === itemId ? { ...it, quantity: Math.max(0, (it.quantity || 0) - qty) } : it));
     movements.push({
       id: `stm_${Date.now()}_${itemId}`, itemId, quantity: qty, type: "kullanım",
       taskId: task.id, taskTicketNo: task.ticketNo, taskDescription: task.description || "",
+      unitPrice, totalCost: unitPrice * qty,
       by: personName || "—", at: new Date().toISOString(),
     });
   });

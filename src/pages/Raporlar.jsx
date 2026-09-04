@@ -40,6 +40,12 @@ const REPORTS = [
   { key: "teknik_performans", label: "Teknik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
   { key: "guvenlik_performans", label: "Güvenlik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
   { key: "temizlik_performans", label: "Temizlik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
+  // Kullanıcı teyidiyle: "raporunu hazırla kullanılan malzeme listesi malzeme
+  // fiyatlarınıda ekleyeceğimden maliyette çıkar" — Stok modülündeki
+  // hareketler (bkz. lib/stock.js consumeStockPatch, artık her hareket
+  // ANINDAKİ birim fiyatı da saklıyor) burada malzeme bazlı özet + maliyetle
+  // raporlanıyor.
+  { key: "malzeme_kullanim", label: "Kullanılan Malzeme Listesi", desc: "Son 30 gün — bakım/arıza işlerinde kullanılan malzemeler ve maliyeti" },
 ];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -287,6 +293,52 @@ function buildPersonelPerformansRapor(state, department) {
   };
 }
 
+// Kullanıcı teyidiyle: "kullanılan malzeme listesi... maliyette çıkar" —
+// hareketteki unitPrice/totalCost (o anki fiyatın anlık görüntüsü) esas
+// alınır; eski (fiyat alanı eklenmeden önceki) hareketlerde bu alanlar
+// yoksa kalemin GÜNCEL fiyatına düşülür (uydurma veri değil, en iyi tahmin).
+function buildMalzemeKullanimRapor(state) {
+  const since = daysAgoStr(29);
+  const items = state.stockItems || [];
+  const itemById = new Map(items.map((it) => [it.id, it]));
+  const movements = (state.stockMovements || [])
+    .filter((m) => m.type === "kullanım" && (m.at || "").slice(0, 10) >= since)
+    .sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  function costOf(m) {
+    if (m.totalCost != null) return m.totalCost;
+    const item = itemById.get(m.itemId);
+    return (Number(item?.price) || 0) * m.quantity;
+  }
+  const totalCost = movements.reduce((s, m) => s + costOf(m), 0);
+  const byItem = {};
+  movements.forEach((m) => {
+    const item = itemById.get(m.itemId);
+    const name = item?.name || m.itemId;
+    if (!byItem[name]) byItem[name] = { qty: 0, cost: 0, unit: item?.unit || "" };
+    byItem[name].qty += m.quantity;
+    byItem[name].cost += costOf(m);
+  });
+  const summaryRows = Object.entries(byItem).sort((a, b) => b[1].cost - a[1].cost);
+  return {
+    title: "Kullanılan Malzeme Listesi", subtitle: `Son 30 gün — ${trDate(since)} – ${trDate(todayStr())}`,
+    stats: [
+      { label: "Toplam Hareket", value: movements.length },
+      { label: "Farklı Malzeme", value: Object.keys(byItem).length },
+      { label: "Toplam Maliyet", value: `${money(totalCost)} ₺` },
+    ],
+    tables: [
+      { title: "Malzeme Bazlı Özet", columns: ["Malzeme", "Kullanılan Miktar", "Toplam Maliyet"],
+        rows: summaryRows.map(([name, v]) => [name, `${money(v.qty)} ${v.unit}`, `${money(v.cost)} ₺`]) },
+      { title: "Kullanım Hareketleri", columns: ["Tarih", "Malzeme", "Miktar", "Birim Fiyat", "Tutar", "İş Emri", "Kullanan"],
+        rows: movements.map((m) => {
+          const item = itemById.get(m.itemId);
+          const unitPrice = m.unitPrice ?? (Number(item?.price) || 0);
+          return [trDate((m.at || "").slice(0, 10)), item?.name || m.itemId, `${m.quantity} ${item?.unit || ""}`, `${money(unitPrice)} ₺`, `${money(costOf(m))} ₺`, m.taskTicketNo ? `#${m.taskTicketNo}` : "—", m.by || "—"];
+        }) },
+    ],
+  };
+}
+
 const BUILDERS = {
   gunluk: buildGunlukRapor, haftalik: buildHaftalikRapor, teknik: buildTeknikRapor, guvenlik: buildGuvenlikRapor, enerji: buildEnerjiRapor, risk: buildRiskRapor,
   teknik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Teknik"),
@@ -297,6 +349,7 @@ const BUILDERS = {
   teknik_performans: (state) => buildPersonelPerformansRapor(state, "Teknik"),
   guvenlik_performans: (state) => buildPersonelPerformansRapor(state, "Güvenlik"),
   temizlik_performans: (state) => buildPersonelPerformansRapor(state, "Temizlik"),
+  malzeme_kullanim: buildMalzemeKullanimRapor,
 };
 
 function ReportPage({ report, branding, logoUrl, printDate }) {
