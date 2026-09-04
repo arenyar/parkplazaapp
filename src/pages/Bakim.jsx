@@ -9,6 +9,8 @@ import { AssetPicker } from "../components/AssetPicker.jsx";
 import { fmtDate } from "../lib/format.js";
 import { periodKeysForYear } from "../lib/periods.js";
 import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
+import { canCloseMaintenanceDirectly } from "../lib/escort.js";
+import { showToast } from "../lib/toast.js";
 
 const PERIODS = ["1 AY", "3 AY", "6 AY", "12 AY"];
 const PRIORITIES = ["Düşük", "Orta", "Yüksek", "Kritik"];
@@ -201,10 +203,24 @@ function MaintenanceGroup({ category, state, updateState, currentUser, canWrite 
     updateState({ tasks: [...state.tasks, ...newTasks], maintenance });
   }
 
+  // Faz 8 — kullanıcı onayıyla: refakat tamamlanmadan (veya hiç
+  // başlamamışken) bir "Planlı Bakım" kaydı sadece Yönetim rolü kapatabilir.
+  // Refakat'ın kendisi mobil "Bakım takvimi" ekranında (bkz.
+  // src/mobile/maintenance/) — burada sadece kapatma kapısı uygulanıyor,
+  // masaüstünde ayrı bir refakat UI'ı YOK (kapsam kullanıcı onayıyla
+  // sadece bu kapıyla sınırlı tutuldu).
   function handleCellClick(item, month) {
     const status = markStatus(item, month, state.tasks);
     if (status === "") createPlannedTask(item, month);
-    else if (status === "planned") setCloseTarget({ item, month });
+    else if (status === "planned") {
+      const mark = item.marks[month];
+      const linkedTask = state.tasks.find((t) => t.id === mark?.taskId);
+      if (linkedTask && !canCloseMaintenanceDirectly(linkedTask, role)) {
+        showToast("Bu kayıt refakat tamamlanmadan kapatılamaz — mobil Bakım takvimi'nden refakat başlatın, veya Yönetim rolüyle kapatın.", "error");
+        return;
+      }
+      setCloseTarget({ item, month });
+    }
     else if (status === "done") {
       const marks = { ...item.marks }; delete marks[month];
       const maintenance = state.maintenance.map((m) => (m.id === item.id ? { ...m, marks } : m));
@@ -439,7 +455,7 @@ function ArizaSummary({ state }) {
   );
 }
 
-export function Bakim({ state, updateState, currentUser, canWrite = true }) {
+export function Bakim({ state, updateState, currentUser, role, canWrite = true }) {
   const planliCount = state.maintenance.filter((m) => !m.archived && (m.category || "Planlı") !== "Yasal").length;
   const yasalCount = state.maintenance.filter((m) => !m.archived && m.category === "Yasal").length;
   const arizaCount = state.tasks.filter((t) => t.category === "Arıza Bakım").length;

@@ -1,10 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Smartphone, Home, GripVertical, Eye, EyeOff, RotateCcw } from "lucide-react";
+import { Smartphone, Home, GripVertical, Eye, EyeOff, RotateCcw, Users } from "lucide-react";
 import { T, deptColor } from "../theme.js";
 import { PageHeader, Card, CardTitle, Button } from "../components/ui.jsx";
 import { GlobalStyle } from "../layout/GlobalStyle.jsx";
-import { MobileBottomNav } from "../layout/MobileBottomNav.jsx";
+import { ThemeContext } from "../lib/ThemeContext.jsx";
+import { mobileUiTheme } from "../mobile/tokens.js";
+import { BottomTabs } from "../mobile/nav/BottomTabs.jsx";
+import { TopBar } from "../mobile/nav/TopBar.jsx";
+import { NavDrawer } from "../mobile/nav/NavDrawer.jsx";
+import { ARACLAR_ITEMS, DAHAFAZLA_ITEMS } from "../mobile/nav/navConfig.js";
+import { ALL_PERMISSION_SCREENS } from "../mockData.js";
 import { Dashboard, DEFAULT_SECTION_ORDER, DEFAULT_HIDDEN_SECTIONS, SECTION_LABELS } from "./Dashboard.jsx";
 import { Teknik } from "./Teknik.jsx";
 import { Guvenlik } from "./Guvenlik.jsx";
@@ -119,7 +125,7 @@ function PhoneFrame({ children }) {
       const idoc = iframe.contentDocument;
       if (!idoc || !idoc.body) return;
       idoc.body.style.margin = "0";
-      idoc.body.style.background = T.bg;
+      idoc.body.style.background = mobileUiTheme.bg;
       idoc.body.style.fontFamily = "'Segoe UI', Inter, system-ui, sans-serif";
       setMountNode(idoc.body);
     }
@@ -128,20 +134,105 @@ function PhoneFrame({ children }) {
     return () => iframe.removeEventListener("load", setup);
   }, []);
 
+  // Gerçek telefonda kullanılan CSS yolu ile AYNI (`.mobile-shell`, bkz.
+  // GlobalStyle.jsx) — önceden burada masaüstünün daraltılmış `.app-shell`
+  // hali kullanılıyordu, bu da önizlemenin gerçek mobil deneyimden (kabuk
+  // rengi, bottom-nav stili) sapmasına yol açıyordu.
   return (
-    <div style={{ width: 375, flexShrink: 0, borderRadius: 40, padding: 12, background: "#0B1420", border: "1px solid #24313F", boxShadow: "0 20px 50px rgba(0,0,0,0.45)" }}>
-      <div style={{ width: 120, height: 20, background: "#0B1420", border: "1px solid #24313F", borderRadius: 12, margin: "0 auto 8px" }} />
-      <div style={{ width: "100%", height: 740, borderRadius: 26, overflow: "hidden", background: T.bg }}>
+    <div style={{ width: 375, flexShrink: 0, borderRadius: 40, padding: 12, background: "#12202E", border: "1px solid #24313F", boxShadow: "0 20px 50px rgba(0,0,0,0.45)" }}>
+      <div style={{ width: 120, height: 20, background: "#12202E", border: "1px solid #24313F", borderRadius: 12, margin: "0 auto 8px" }} />
+      <div style={{ width: "100%", height: 740, borderRadius: 26, overflow: "hidden", background: mobileUiTheme.bg }}>
         <iframe ref={iframeRef} title="Mobil Önizleme" src="about:blank" style={{ width: "100%", height: "100%", border: "none", display: "block" }} />
       </div>
       {mountNode && createPortal(
-        <>
+        <ThemeContext.Provider value={mobileUiTheme}>
           <GlobalStyle />
-          <div className="app-shell">{children}</div>
-        </>,
+          <div className="mobile-shell">{children}</div>
+        </ThemeContext.Provider>,
         mountNode
       )}
     </div>
+  );
+}
+
+// Kullanıcı teyidiyle: "1 hamburger menuyu düzenleyemiyorum mobil dizaynda
+// yok" — önceki sürüm sadece <main> + BottomTabs gösteriyordu, TopBar/
+// hamburger/NavDrawer önizlemede hiç yoktu. Gerçek NavDrawer'ı burada da
+// açıyoruz. Drawer satırlarının hepsi bu önizlemede ayrı bir sayfaya
+// gitmiyor (ör. Raporlar/Ayarlar) — sadece dept sayfalarına (Teknik/
+// Güvenlik/Temizlik/Talep yönetimi) giden satırlar burada da gerçekten
+// gezinir, geri kalanı sessizce kapanır.
+//
+// Kullanıcı teyidiyle (devamında): "gözden geçirebiliyorum ama kim ne
+// görebilir yetkilendiremiyorum" — önceki sürüm önizlemeyi HER ZAMAN tam
+// yetkiyle gösteriyordu (gerçek kısıtlama yansımıyordu) ve yetkiyi
+// değiştirecek bir kontrol yoktu. Aşağıdaki iki fonksiyon, seçili
+// departmanın GERÇEK hesaplarından (state.users, personelin department'ına
+// göre) o departmanın şu an neyi görebildiğini hesaplıyor — uydurma bir
+// önizleme değil. `MenuPermissions` bunu değiştirebiliyor: departmandaki
+// TÜM hesaplara birden uygulanır (bkz. bileşenin kendi yorumu) ve bu ekranın
+// dışında da (masaüstü sidebar, Ayarlar > Kullanıcı Yetkilendirme) aynı
+// `state.users[].permissions` alanını kullandığı için değişiklik HER YERE
+// anında yansır — ayrı bir "mobil menü yetkisi" icat edilmedi.
+function deptAccountsFor(dept, state) {
+  return state.users.filter((u) => {
+    const person = state.team.find((t) => t.id === u.personnelId);
+    return person && person.department === dept;
+  });
+}
+function computeDeptPermissions(dept, state) {
+  const accounts = deptAccountsFor(dept, state);
+  const perms = {};
+  ALL_PERMISSION_SCREENS.forEach((key) => {
+    const checked = accounts.length > 0 && accounts.every((u) => u.permissions[key]?.view || u.permissions[key]?.read);
+    perms[key] = { view: checked, read: checked, write: checked };
+  });
+  return perms;
+}
+// Sürükle-bırak (LayoutEditor) ile aynı üslupta — çift satırı önlemek için
+// aynı screenKey'e sahip satırlardan (ör. "Talep yönetimi"/"Görevler" ikisi
+// de "operasyonlar") yalnız ilki listelenir; ikisi de aynı yetkiyi paylaştığı
+// için tek checkbox yeterli.
+const MENU_PERMISSION_ITEMS = [...ARACLAR_ITEMS, ...DAHAFAZLA_ITEMS].filter(
+  (item, idx, arr) => item.screenKey && arr.findIndex((x) => x.screenKey === item.screenKey) === idx
+);
+
+function MenuPermissions({ dept, state, updateState }) {
+  const accounts = deptAccountsFor(dept, state);
+  const perms = computeDeptPermissions(dept, state);
+  function toggle(screenKey) {
+    if (accounts.length === 0) return;
+    const next = !perms[screenKey].view;
+    const ids = new Set(accounts.map((u) => u.id));
+    updateState({
+      users: state.users.map((u) => (ids.has(u.id) ? { ...u, permissions: { ...u.permissions, [screenKey]: { view: next, read: next, write: next } } } : u)),
+    });
+  }
+  return (
+    <Card>
+      <CardTitle num="04" right={<Users size={14} color={T.dim} />}>Menü Yetkileri — {dept}</CardTitle>
+      {accounts.length === 0 ? (
+        <p style={{ fontSize: 11.5, color: T.dimmer, margin: 0 }}>{dept} departmanında giriş hesabı olan personel yok — önce Yönetim'den "Kullanıcı Aç" gerekir.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {MENU_PERMISSION_ITEMS.map((item) => {
+            const checked = perms[item.screenKey].view;
+            const Icon = item.icon;
+            return (
+              <label key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 8, cursor: "pointer", background: T.surface2 }}>
+                <input type="checkbox" checked={checked} onChange={() => toggle(item.screenKey)} />
+                <Icon size={14} color={T.dim} style={{ flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 12, color: T.ink }}>{item.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: T.dimmer, margin: "10px 0 0" }}>
+        {dept} departmanındaki {accounts.length} hesabın tümüne birden uygulanır — hem telefon menüsüne hem masaüstü menüsüne (aynı ekranlar paylaşılıyor) anında yansır.
+        Tek bir kişiye özel istisna için Ayarlar &gt; Kullanıcı Yetkilendirme'yi kullanın.
+      </p>
+    </Card>
   );
 }
 
@@ -153,6 +244,7 @@ export function MobilTasarim({ state, updateState }) {
   // Güvenlik) sayfasını açabiliyor.
   const [activePage, setActivePage] = useState(null); // "Teknik" | "Güvenlik" | "Temizlik" | "operasyonlar"
   const [deepLink, setDeepLink] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const previewUser = "Saha Personeli (Önizleme)";
 
   function selectDept(d) { setDept(d); setScreen("dashboard"); setActivePage(null); setDeepLink(null); }
@@ -172,6 +264,27 @@ export function MobilTasarim({ state, updateState }) {
     setActivePage(view);
     setScreen("page");
   }
+
+  // NavDrawer, gerçek MobileApp.jsx'teki gibi screenKey üretiyor (navConfig.js)
+  // — burada dept/screen/activePage'e çeviriyoruz. Desteklenmeyen satırlar
+  // (Kontroller/Raporlar/Ayarlar/Personel/Öneriler...) bu önizlemede ayrı
+  // bir bileşene sahip değil, sessizce kapanır.
+  function handleDrawerSelect(item) {
+    setDrawerOpen(false);
+    const key = item.screenKey || item.key;
+    if (key === "dashboard") { goHome(); return; }
+    if (key === "bakim") { goToDeptShortcut("Teknik"); return; }
+    if (key === "guvenlik") { goToDeptShortcut("Güvenlik"); return; }
+    if (key === "temizlik") { goToDeptShortcut("Temizlik"); return; }
+    if (key === "operasyonlar") { goToView("operasyonlar"); return; }
+  }
+  const drawerActiveKey =
+    screen === "dashboard" ? "dashboard" :
+    activePage === "Teknik" ? "bakim" :
+    activePage === "Güvenlik" ? "guvenlik" :
+    activePage === "Temizlik" ? "temizlik" :
+    activePage === "operasyonlar" ? "operasyonlar" : null;
+  const topBarLabel = screen === "dashboard" ? "Anasayfa" : activePage === "operasyonlar" ? "Talep yönetimi" : (activePage || dept);
 
   function renderScreen() {
     if (screen === "dashboard") {
@@ -224,6 +337,8 @@ export function MobilTasarim({ state, updateState }) {
 
           <LayoutEditor dept={dept} state={state} updateState={updateState} />
 
+          <MenuPermissions dept={dept} state={state} updateState={updateState} />
+
           <Card>
             <CardTitle num="03" right={<Smartphone size={14} color={T.dim} />}>Senaryo</CardTitle>
             <p style={{ fontSize: 11.5, color: T.dim, margin: "0 0 8px" }}>
@@ -233,16 +348,21 @@ export function MobilTasarim({ state, updateState }) {
               Mahal Kontrol içinde checklist doldururken "▶ Görev Başlat" / "⚠ Arıza Kaydı Oluştur" (Teknik'te ayrıca "🔧 Ekipman Güncelle") ile de iş emri açılabiliyor.
             </p>
             <p style={{ fontSize: 11, color: T.dimmer, margin: 0 }}>
-              Bu, üretimdeki bileşenlerin canlı hali — burada yapılan bir işlem gerçek veriye yazılır. Alt bardaki Tara/Uyarılar/Diğer önizlemede pasiftir.
+              Bu, üretimdeki bileşenlerin canlı hali — burada yapılan bir işlem gerçek veriye yazılır. Alt bar önizlemede pasiftir.
             </p>
           </Card>
         </div>
 
         <PhoneFrame>
+          <TopBar baslik={topBarLabel} kapsam={state.branding.siteName} bildirimSayisi={0} bildirimKiremit={false} onMenu={() => setDrawerOpen(true)} onSearch={() => {}} />
           <main className="main-content">{renderScreen()}</main>
-          <MobileBottomNav view={screen === "dashboard" ? "dashboard" : "operasyonlar"}
-            setView={(v) => { if (v === "dashboard") goHome(); }}
-            unreadCount={0} onScan={() => {}} onAlerts={() => {}} onMore={() => {}} />
+          <BottomTabs active={screen === "dashboard" ? "dashboard" : null} onChange={(v) => { if (v === "dashboard") goHome(); }} onScan={() => {}} />
+          <NavDrawer
+            open={drawerOpen} onClose={() => setDrawerOpen(false)}
+            userName={previewUser} deptLabel={dept} siteName={state.branding.siteName} photoUrl={null}
+            permissions={computeDeptPermissions(dept, state)} tasks={state.tasks} currentUserName={previewUser} draftCount={0}
+            activeKey={drawerActiveKey} onSelect={handleDrawerSelect} onLogout={() => {}} onDesktopSwitch={() => {}} onOpenProfile={() => {}}
+          />
         </PhoneFrame>
       </div>
     </div>

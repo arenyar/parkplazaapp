@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { X, Smartphone, KeyRound } from "lucide-react";
-import { T, deptColor } from "../theme.js";
+import { deptColor } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, CardTitle, Button, Field, Input, Select } from "../components/ui.jsx";
 import { NAV_ITEMS } from "../layout/navItems.js";
-import { MobilTasarim } from "./MobilTasarim.jsx";
 import { resetPasswordEmail } from "../firebase.js";
 import { showToast } from "../lib/toast.js";
 import { authErrorMessage } from "../lib/authErrors.js";
@@ -13,10 +13,10 @@ const TABS = [
   { key: "bakimlar", label: "Bakımlar" },
   { key: "departmanlar", label: "Departmanlar" },
   { key: "yetkilendirme", label: "Kullanıcı Yetkilendirme" },
-  { key: "mobil", label: "Mobil Tasarım" },
 ];
 
 function ChipList({ title, items, onAdd, onRemove }) {
+  const T = useTheme();
   const [val, setVal] = useState("");
   return (
     <Card>
@@ -45,6 +45,7 @@ function ChipList({ title, items, onAdd, onRemove }) {
 // kaynak, sidebar'da hangi ekranlar varsa burada da aynı liste); son sütun
 // mobil erişim. Çok satır olduğu için departmana göre filtrelenebilir.
 function UserAccessTable({ state, updateState, canWrite }) {
+  const T = useTheme();
   const [deptFilter, setDeptFilter] = useState("");
   const [q, setQ] = useState("");
   const [resetSentId, setResetSentId] = useState(null);
@@ -163,19 +164,20 @@ function UserAccessTable({ state, updateState, canWrite }) {
 // yönetiliyor — binanın tüm departmanlarının (Teknik/Temizlik/Güvenlik/Talep-
 // Şikayet) referans aldığı ortak veri olduğu için buradan taşındı.
 export function Ayarlar({ state, updateState, canWrite = true }) {
+  const T = useTheme();
   const [tab, setTab] = useState("genel");
   function updateBranding(patch) { updateState({ branding: { ...state.branding, ...patch } }); }
   function updateInvoiceSettings(patch) { updateState({ invoiceSettings: { ...state.invoiceSettings, ...patch } }); }
 
   return (
     <div>
-      <div style={{ background: "#0B1420", borderRadius: 14, padding: "16px 20px 18px", marginBottom: 18 }}>
-        <h1 style={{ margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: "#fff" }}>Ayarlar</h1>
+      <div style={{ background: T.surface3, borderRadius: 14, padding: "16px 20px 18px", marginBottom: 18 }}>
+        <h1 style={{ margin: "0 0 14px", fontSize: 17, fontWeight: 700, color: T.ink }}>Ayarlar</h1>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {TABS.map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}
               style={{ border: "none", borderRadius: 999, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-                background: tab === tb.key ? T.accent : "#fff", color: tab === tb.key ? "#0B1420" : "#132A20" }}>
+                background: tab === tb.key ? T.accent : T.surface, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.ink }}>
               {tb.label}
             </button>
           ))}
@@ -240,7 +242,6 @@ export function Ayarlar({ state, updateState, canWrite = true }) {
       )}
 
       {tab === "yetkilendirme" && <UserAccessTable state={state} updateState={updateState} canWrite={canWrite} />}
-      {tab === "mobil" && <MobilTasarim state={state} updateState={updateState} />}
     </div>
   );
 }

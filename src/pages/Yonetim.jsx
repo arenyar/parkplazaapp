@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Pencil, ChevronRight, KeyRound, ShieldCheck } from "lucide-react";
+import { Plus, Trash2, Pencil, ChevronRight, KeyRound, ShieldCheck, Phone, BarChart3, X } from "lucide-react";
 import { T, deptColor } from "../theme.js";
 import { PageHeader, Card, Button, Field, Input, Select, AvatarInitials } from "../components/ui.jsx";
 import { fmtDate } from "../lib/format.js";
@@ -8,6 +8,7 @@ import { NAV_ITEMS } from "../layout/navItems.js";
 import { createAuthAccount, resetPasswordEmail } from "../firebase.js";
 import { showToast } from "../lib/toast.js";
 import { authErrorMessage } from "../lib/authErrors.js";
+import { computePersonStats, computeDepartmentAvgClosureDays, lastCompletedTask, openTasksByCategory } from "../mobile/personnel/personStats.js";
 
 function empty(departments) { return { id: null, name: "", role: "", department: departments[0], email: "", phone: "", startDate: "" }; }
 
@@ -99,7 +100,163 @@ function UserPanel({ account, onSave, onClose, onResetPassword }) {
 // personel eklendiğinde hesabı otomatik açılmaz (bilinçli bir adım gerekir);
 // bu, daha önce Yönetim'den eklenen personelin hiç giriş bilgisi oluşmadan
 // kalıp giriş yapamaması sorununu kalıcı çözüyor.
+function fmtDays(d) {
+  if (d == null) return "—";
+  if (d < 1) return `${Math.round(d * 24)} sa`;
+  return `${d.toFixed(1)} gün`;
+}
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleDateString("tr-TR"); } catch { return "—"; }
+}
+
+// Kullanıcı teyidiyle: "mobil tarafta çok detaylı olan personel kartlarını
+// web sayfası ile eşitle, mobildeki personel kartları daha detaylı" —
+// mobildeki PersonCard'ın (mobile/personnel/PersonCard.jsx: Özet · Açık
+// işler · İstatistik) AYNI veri fonksiyonları (personStats.js) burada da
+// kullanılıyor, ikinci bir hesaplama yolu icat edilmedi. Bu panel, satırdaki
+// mevcut admin aksiyonlarının (Düzenle/Sil/Kullanıcı Aç/Yetkileri Düzenle)
+// YERİNE değil, YANINA ekleniyor — mobil kart bilerek salt-okunur (yazma
+// PersonCard'da yok), masaüstünde admin yetkisi zaten var ve kalmalı.
+// Kullanıcı teyidiyle: "web kısmında personel düzenlemede popup aç" —
+// satır içi genişleyen panel yerine, mobildeki PersonCard ile aynı
+// verilerle (tab: Özet/Açık İşler/İstatistik) tam ekran popup.
+// Kullanıcı teyidiyle: "kendi görevleri 'atanan görevler', ortak görevler,
+// henüz atanmamış havuzda bekleyen görevler" — mobil PersonCard'daki üç
+// kategoriyle AYNI (bkz. personStats.js openTasksByCategory), masaüstünde
+// de tekrarlanmadı.
+function CategorySection({ label, tasks, color, open, onToggle }) {
+  return (
+    <div style={{ marginBottom: 8, border: `1px solid ${T.line}`, borderRadius: 8, overflow: "hidden" }}>
+      <button onClick={onToggle} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 10px", background: `${color}1A` }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color }}>{label} · {tasks.length}</span>
+        <ChevronRight size={13} color={color} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+      {open && (
+        <div style={{ padding: tasks.length ? "6px" : "8px 10px" }}>
+          {tasks.length === 0 ? (
+            <p style={{ fontSize: 11.5, color: T.dimmer, margin: 0 }}>Bu kategoride kayıt yok.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {tasks.map((t) => (
+                <div key={t.id} style={{ padding: "7px 9px", background: T.surface2, borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
+                  <div style={{ fontSize: 10.5, color: T.dim, marginTop: 1 }}>{t.status}{t.assignee ? ` · ${t.assignee}` : ""}{t.dueDate ? ` · Termin ${fmtDate(t.dueDate)}` : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PersonDetail({ person, state, onClose }) {
+  const [tab, setTab] = useState("ozet");
+  const [openCat, setOpenCat] = useState(() => new Set(["assigned"]));
+  function toggleCat(key) { setOpenCat((s) => { const next = new Set(s); next.has(key) ? next.delete(key) : next.add(key); return next; }); }
+  const categories = openTasksByCategory(state.tasks, person);
+  const openTasksCount = categories.assigned.length + categories.teamOthers.length + categories.pool.length;
+  const lastDone = lastCompletedTask(state.tasks, person.name);
+  const stats = computePersonStats(state.tasks, person.name);
+  const deptAvg = computeDepartmentAvgClosureDays(state.tasks, person.department);
+  const maxDur = Math.max(stats.avgClosureDays || 0, deptAvg || 0, 1);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(0,0,0,0.55)" }} onClick={onClose}>
+    <div onClick={(e) => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 14, width: 460, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", padding: "20px 22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <AvatarInitials name={person.name} size={44} bg={deptColor(person.department)} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: T.ink }}>{person.name}</div>
+          <div style={{ fontSize: 12, color: T.dim }}>{person.role} · {person.department}</div>
+        </div>
+        <button onClick={onClose} aria-label="Kapat" style={{ background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex" }}>
+          <X size={20} />
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: `1px solid ${T.line}`, paddingBottom: 8 }}>
+        {[{ key: "ozet", label: "Özet" }, { key: "acik", label: `Açık İşler (${openTasksCount})` }, { key: "istatistik", label: "İstatistik" }].map((tb) => (
+          <button key={tb.key} onClick={() => setTab(tb.key)}
+            style={{ border: "none", borderRadius: 999, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer",
+              background: tab === tb.key ? T.accent : "transparent", color: tab === tb.key ? "#0B1420" : T.dim }}>
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "ozet" && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 12 }}>
+            <div><div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase" }}>Görev</div><div style={{ fontSize: 13, color: T.ink, fontWeight: 600 }}>{person.role || "—"}</div></div>
+            <div><div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase" }}>Departman</div><div style={{ fontSize: 13, color: T.ink, fontWeight: 600 }}>{person.department}</div></div>
+            <div><div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase" }}>Telefon</div><div style={{ fontSize: 13, color: T.ink, fontWeight: 600 }}>{person.phone || "Kayıtlı değil"}</div></div>
+            <div><div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase" }}>Başlangıç</div><div style={{ fontSize: 13, color: T.ink, fontWeight: 600 }}>{person.startDate ? fmtDate(person.startDate) : "—"}</div></div>
+          </div>
+          {person.phone && (
+            <a href={`tel:${person.phone}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", border: `1px solid ${T.accent}`, color: T.accent, borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700 }}>
+              <Phone size={14} /> Ara
+            </a>
+          )}
+        </div>
+      )}
+
+      {tab === "acik" && (
+        <div>
+          {openTasksCount === 0 ? (
+            <p style={{ fontSize: 12.5, color: T.dim, margin: 0 }}>Açık kaydı yok.</p>
+          ) : (
+            <div>
+              <CategorySection label="Atanan Görevler" tasks={categories.assigned} color={T.accent} open={openCat.has("assigned")} onToggle={() => toggleCat("assigned")} />
+              <CategorySection label="Ortak Görevler" tasks={categories.teamOthers} color="#E0B354" open={openCat.has("teamOthers")} onToggle={() => toggleCat("teamOthers")} />
+              <CategorySection label="Havuzda Bekleyen Görevler" tasks={categories.pool} color="#E2685A" open={openCat.has("pool")} onToggle={() => toggleCat("pool")} />
+            </div>
+          )}
+          {lastDone && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+              <div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase", marginBottom: 4 }}>Son tamamlanan iş</div>
+              <div style={{ fontSize: 12.5, color: T.ink }}>{lastDone.description}</div>
+              <div style={{ fontSize: 11, color: T.dim, marginTop: 2 }}>{lastDone.location || lastDone.department} · {fmtDateTime(lastDone.completedAt)}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "istatistik" && (
+        <div>
+          <p style={{ margin: "0 0 12px", fontSize: 11.5, color: T.dim }}>Son 30 gün</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#3FB37F" }}>{stats.completedCount}</div>
+              <div style={{ fontSize: 10.5, color: T.dim }}>Tamamlanan</div>
+            </div>
+            <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.accent }}>{stats.openCount}</div>
+              <div style={{ fontSize: 10.5, color: T.dim }}>Açık{stats.overdueCount > 0 ? ` · ${stats.overdueCount} gecikmiş` : ""}</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 10.5, color: T.dim, textTransform: "uppercase", marginBottom: 8 }}>Ortalama kapanış süresi</div>
+          {[{ label: person.name.split(" ")[0], value: stats.avgClosureDays, color: T.accent }, { label: `${person.department} ort.`, value: deptAvg, color: T.dimmer }].map((b) => (
+            <div key={b.label} style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.dim, marginBottom: 3 }}>
+                <span>{b.label}</span><span>{fmtDays(b.value)}</span>
+              </div>
+              <div style={{ height: 5, borderRadius: 3, background: T.line, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${maxDur > 0 ? Math.min(100, ((b.value || 0) / maxDur) * 100) : 0}%`, background: b.color }} />
+              </div>
+            </div>
+          ))}
+          {stats.avgClosureDays == null && <p style={{ fontSize: 11.5, color: T.dimmer, marginTop: 4 }}>Son 30 günde kapanan kaydı yok.</p>}
+        </div>
+      )}
+    </div>
+    </div>
+  );
+}
+
 export function Yonetim({ state, updateState, canWrite = true }) {
+  const [detailFor, setDetailFor] = useState(null);
   const [form, setForm] = useState(empty(state.departments));
   const [formOpen, setFormOpen] = useState(false);
   const [editingAccountFor, setEditingAccountFor] = useState(null);
@@ -222,6 +379,7 @@ export function Yonetim({ state, updateState, canWrite = true }) {
                         </div>
                       )}
                     </div>
+                    <Button variant="ghost" icon={BarChart3} onClick={() => setDetailFor(t.id)}>Detaylar</Button>
                     {canWrite && (
                       emailMismatch ? (
                         <Button variant="ghost" icon={ShieldCheck} onClick={() => relinkAccountEmail(t, account)}>Hesabı Yeni E-postaya Taşı</Button>
@@ -234,6 +392,7 @@ export function Yonetim({ state, updateState, canWrite = true }) {
                     {canWrite && <button onClick={() => startEdit(t)} style={{ background: "none", border: "none", cursor: "pointer" }}><Pencil size={14} color={T.dim} /></button>}
                     {canWrite && <button onClick={() => remove(t.id)} style={{ background: "none", border: "none", cursor: "pointer" }}><Trash2 size={14} color="#E2685A" /></button>}
                   </div>
+                  {detailFor === t.id && <PersonDetail person={t} state={state} onClose={() => setDetailFor(null)} />}
                   {editingAccountFor === t.id && account && (
                     <UserPanel account={account} onClose={() => setEditingAccountFor(null)}
                       onSave={(patch) => saveAccount(t.id, patch)} onResetPassword={() => resetPassword(t.id)} />

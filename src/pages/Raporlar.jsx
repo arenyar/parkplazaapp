@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { FileText, Download, Printer, X } from "lucide-react";
-import { T } from "../theme.js";
+import { FileText, Download, Printer, X, Send } from "lucide-react";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button } from "../components/ui.jsx";
 import { riskScore, riskBand } from "../lib/sla.js";
+import { findDeptManager } from "../mockData.js";
+import { openMailto } from "../lib/mailto.js";
+import { showToast } from "../lib/toast.js";
+import { PrintHeader, FindingsPage } from "../components/PrintDocument.jsx";
+import { buildFindings } from "../lib/findings.js";
 
 const REPORTS = [
   { key: "gunluk", label: "Günlük Operasyon Raporu", desc: "Bugünkü tüm görev, kontrol ve olay özeti" },
@@ -11,6 +16,15 @@ const REPORTS = [
   { key: "guvenlik", label: "Güvenlik Raporu", desc: "Devriye ve olay kayıtları" },
   { key: "enerji", label: "Enerji Raporu", desc: "Tüketim trendi ve anomaliler" },
   { key: "risk", label: "Risk Raporu", desc: "Açık risk kayıtları ve aksiyon durumu" },
+  // Kullanıcı teyidiyle: "görev tamamlandıktan sonra tek sayfada sığacak
+  // şekilde günlük departman müdürüne mail atsın" — mevcut "Teknik Rapor"/
+  // "Güvenlik Raporu" KÜMÜLATİF (tüm zamanlar), günlük değil; bu üçü ise
+  // SADECE bugün tamamlanan iş — ReportPage zaten tek A4 sayfaya sığacak
+  // şekilde tasarlı (bkz. "fatura-sayfa" 190mm×160mm), yeni bir sayfa
+  // düzeni icat edilmedi.
+  { key: "teknik_gunluk", label: "Teknik Günlük Rapor", desc: "Bugün tamamlanan Teknik iş ve mahal kontrolleri — şefe gönderilebilir" },
+  { key: "guvenlik_gunluk", label: "Güvenlik Günlük Rapor", desc: "Bugün tamamlanan Güvenlik iş ve devriyeler — şefe gönderilebilir" },
+  { key: "temizlik_gunluk", label: "Temizlik Günlük Rapor", desc: "Bugün tamamlanan Temizlik iş ve mahal kontrolleri — sorumluya gönderilebilir" },
 ];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -88,6 +102,7 @@ function buildTeknikRapor(state) {
   const today = todayStr();
   const expiringSoon = assets.filter((a) => a.expiryDate && a.expiryDate <= daysAgoStr(-30) && a.expiryDate >= today);
   const expired = assets.filter((a) => a.expiryDate && a.expiryDate < today);
+  const teknikRuns = (state.mahalRuns || []).filter((r) => r.department === "Teknik" && r.status === "Tamamlandı");
   return {
     title: "Teknik Rapor", subtitle: trDate(today),
     stats: [
@@ -102,6 +117,7 @@ function buildTeknikRapor(state) {
       { title: "Süresi Geçmiş / Yaklaşan Varlıklar", columns: ["Varlık", "Kategori", "Son Kullanma Tarihi"],
         rows: [...expired, ...expiringSoon].map((a) => [a.name, a.category, trDate(a.expiryDate)]) },
     ],
+    findings: buildFindings(state, teknikRuns),
   };
 }
 
@@ -161,16 +177,44 @@ function buildRiskRapor(state) {
   };
 }
 
-const BUILDERS = { gunluk: buildGunlukRapor, haftalik: buildHaftalikRapor, teknik: buildTeknikRapor, guvenlik: buildGuvenlikRapor, enerji: buildEnerjiRapor, risk: buildRiskRapor };
+// Tek departman, TEK GÜN (bugün) — kümülatif Teknik/Güvenlik raporlarından
+// farkı bu. `department` alanı ReportPage'in "Departman Müdürüne Gönder"
+// düğmesini göstermesi için işaretleniyor (bkz. findDeptManager, mockData.js).
+function buildDepartmanGunlukRapor(state, department) {
+  const today = todayStr();
+  const tasksToday = (state.tasks || []).filter((t) => !t.archived && t.department === department && t.status === "Tamamlandı" && (t.updatedAt || "").slice(0, 10) === today);
+  const openTasks = (state.tasks || []).filter((t) => !t.archived && t.department === department && t.status !== "Tamamlandı" && t.status !== "İptal");
+  const runsToday = (state.mahalRuns || []).filter((r) => r.department === department && r.status === "Tamamlandı" && (r.completedAt || "").slice(0, 10) === today);
+  const failedRunsToday = runsToday.filter((r) => (r.failedQuestions || []).length > 0);
+  return {
+    title: `${department} Günlük Rapor`, subtitle: trDate(today), department,
+    stats: [
+      { label: "Bugün Tamamlanan Görev", value: tasksToday.length },
+      { label: "Toplam Açık Görev", value: openTasks.length },
+      { label: "Bugün Tamamlanan Mahal Kontrol", value: runsToday.length },
+      { label: "Uygunsuzluk Tespit Edilen", value: failedRunsToday.length },
+    ],
+    tables: [
+      { title: "Bugün Tamamlanan Görevler", columns: ["Bilet No", "Öncelik", "Açıklama", "Tamamlayan"],
+        rows: tasksToday.map((t) => [t.ticketNo, t.priority, t.description, t.assignee || "—"]) },
+      { title: "Bugün Tamamlanan Mahal Kontrolleri", columns: ["Mahal", "Kontrol Eden", "Sonuç"],
+        rows: runsToday.map((r) => [r.pointId, r.completedBy || "—", (r.failedQuestions || []).length > 0 ? `${r.failedQuestions.length} uygunsuzluk` : "Uygun"]) },
+    ],
+    findings: buildFindings(state, runsToday),
+  };
+}
 
-function ReportPage({ report, printDate }) {
+const BUILDERS = {
+  gunluk: buildGunlukRapor, haftalik: buildHaftalikRapor, teknik: buildTeknikRapor, guvenlik: buildGuvenlikRapor, enerji: buildEnerjiRapor, risk: buildRiskRapor,
+  teknik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Teknik"),
+  guvenlik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Güvenlik"),
+  temizlik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Temizlik"),
+};
+
+function ReportPage({ report, branding, logoUrl, printDate }) {
   return (
     <div className="fatura-sayfa" style={{ background: "#fff", color: "#1a1a1a", width: "190mm", minHeight: "160mm", margin: "0 auto 10mm", padding: "14mm", fontFamily: "Arial, Helvetica, sans-serif", boxSizing: "border-box" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#5CA83E" }}>PARK PLAZA</div>
-        <div style={{ fontSize: 11, color: "#333" }}>{trDate(printDate)}</div>
-      </div>
-      <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 2 }}>{report.title}</div>
+      <PrintHeader branding={branding} logoUrl={logoUrl} docTitle={report.title} docSubtitle={trDate(printDate)} />
       <div style={{ fontSize: 11.5, color: "#555", marginBottom: 16 }}>{report.subtitle}</div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
@@ -206,11 +250,33 @@ function ReportPage({ report, printDate }) {
 }
 
 export function Raporlar({ state }) {
+  const T = useTheme();
   const [selected, setSelected] = useState(null);
   const report = selected ? BUILDERS[selected](state) : null;
   const printDate = new Date().toISOString().slice(0, 10);
 
   function print() { setTimeout(() => window.print(), 60); }
+
+  // Kullanıcı teyidiyle: "günlük departman müdürüne mail atsın" — gerçek
+  // otomatik/zamanlanmış gönderim DEĞİL (bu depoda hiç e-posta/backend
+  // altyapısı yok, bkz. lib/mailto.js başındaki not) — kullanıcının e-posta
+  // istemcisini müdürün adresi ve rapor özetiyle ÖNCEDEN DOLU açar, PDF eki
+  // "Yazdır / PDF Kaydet"ten sonra elle eklenir.
+  function sendToManager() {
+    const manager = findDeptManager(state.team, report.department);
+    if (!manager) { showToast(`${report.department} departmanında (Şef/Sorumlu rolünde, e-postası kayıtlı) bir yönetici bulunamadı.`, "error"); return; }
+    showToast("E-posta taslağı açıldı — PDF'i önce \"Yazdır / PDF Kaydet\" ile kaydedip ek olarak eklemeyi unutmayın.", "info");
+    const body = [
+      `${state.branding?.siteName || "Park Plaza"} — ${report.title}`, "",
+      ...report.stats.map((s) => `${s.label}: ${s.value}`), "",
+      ...report.tables.flatMap((tbl) => [
+        tbl.title + ":",
+        ...(tbl.rows.length === 0 ? ["  (kayıt yok)"] : tbl.rows.map((row) => "  - " + row.join(" · "))),
+        "",
+      ]),
+    ].join("\n");
+    openMailto({ to: manager.email, subject: `${report.title} — ${trDate(printDate)}`, body });
+  }
 
   return (
     <div>
@@ -232,6 +298,7 @@ export function Raporlar({ state }) {
             <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{report.title} — Önizleme</div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button icon={Printer} onClick={print}>Yazdır / PDF Kaydet</Button>
+              {report.department && <Button icon={Send} variant="ghost" onClick={sendToManager}>Departman Müdürüne Gönder</Button>}
               <button onClick={() => setSelected(null)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 7, padding: "6px 8px", cursor: "pointer", color: T.dim, display: "flex" }}><X size={15} /></button>
             </div>
           </div>
@@ -260,12 +327,16 @@ export function Raporlar({ state }) {
               )}
             </div>
           ))}
+          {report.findings?.length > 0 && (
+            <p style={{ fontSize: 11.5, color: T.dim, margin: "10px 0 0" }}>+ {report.findings.length} tespit — PDF çıktısında "Tespitler" başlıklı ek sayfada (görselleriyle).</p>
+          )}
         </Card>
       )}
 
       {report && (
         <div className="invoice-print-area">
-          <ReportPage report={report} printDate={printDate} />
+          <ReportPage report={report} branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl} printDate={printDate} />
+          <FindingsPage branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl} printDate={trDate(printDate)} items={report.findings} />
         </div>
       )}
     </div>

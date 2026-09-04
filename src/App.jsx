@@ -32,6 +32,7 @@ import { Raporlar } from "./pages/Raporlar.jsx";
 import { Kpi } from "./pages/Kpi.jsx";
 import { Yonetim } from "./pages/Yonetim.jsx";
 import { Ayarlar } from "./pages/Ayarlar.jsx";
+import { MobilTasarim } from "./pages/MobilTasarim.jsx";
 
 // Mahal Kontrol QR'ı (bkz. MahalKontrol.jsx QrModal) hangi departman
 // sayfasına düşer — hem uygulama içi kamera taramasında (handleQrDecoded)
@@ -40,9 +41,20 @@ import { Ayarlar } from "./pages/Ayarlar.jsx";
 // lib/departmentView.js — MobileApp.jsx ile paylaşılıyor, dairesel import
 // olmasın diye ayrı dosyada).
 
+// Kullanıcı teyidiyle: "benim kullanıcıma özel departmanlar arası geçiş
+// yapabilecek bir çalışma" — sadece test hesabı için (Mobil > Profil'de bir
+// "Departman Görünümü" seçici), diğer TÜM hesaplar için hiçbir değişiklik
+// yok. Firestore'daki `users` koleksiyonu mockData.js'in ilk seed'inden
+// türediği ve buraya yeni bir alan eklemek zaten canlı kayıtları geriye
+// dönük güncellemeyeceği için (bkz. migrateLegacyState notu), yetkilendirme
+// var olan e-postayla eşleştirilir — kapsam SADECE mobil (masaüstü
+// Operations Center'daki `role`/Sidebar/TopBar bundan etkilenmez).
+const DEPT_SWITCH_TEST_EMAIL = "yonetim@parkplazamaslak.com";
+
 export default function App() {
   const [state, setState] = useState(makeInitialState);
   const [view, setView] = useState("dashboard");
+  const [testDeptOverride, setTestDeptOverride] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
@@ -157,9 +169,14 @@ export default function App() {
   // bkz. firebase.js saveState. Yerel React state ekranın anında güncellenmesi
   // için hâlâ tam birleşmiş halde tutulur, değişen sadece Firestore'a giden
   // yazmanın kapsamı.
-  function updateState(patch) {
+  // `opts.silent` — Faz 1b çevrimdışı kuyruğunun arka plan yeniden
+  // denemeleri için (bkz. MobileApp.jsx safeUpdateState); dönüş değeri
+  // (Promise<boolean>) aynı kuyruğun yazmanın gerçekten başarılı olup
+  // olmadığını bilmesi için — mevcut çağıranlar bu değeri okumuyor,
+  // davranışları değişmedi.
+  function updateState(patch, opts) {
     setState((s) => ({ ...s, ...patch }));
-    saveState(patch);
+    return saveState(patch, opts);
   }
 
   useEffect(() => {
@@ -300,13 +317,16 @@ export default function App() {
   const allowedScreens = Object.keys(permissions).filter((k) => permissions[k]?.view || permissions[k]?.read);
   const activeView = allowedScreens.includes(view) ? view : (allowedScreens[0] || "dashboard");
   const canWrite = (screenKey) => !!permissions[screenKey]?.write;
+  const canSwitchDept = (currentAccount.username || "").toLowerCase() === DEPT_SWITCH_TEST_EMAIL;
+  const mobileRole = canSwitchDept && testDeptOverride ? testDeptOverride : role;
 
   if (isMobileRoute) {
     return (
       <MobileApp state={state} updateState={updateState} currentUser={currentUser} currentAccount={currentAccount}
-        role={role} canWrite={canWrite} branding={state.branding} onLogout={() => fbLogout()}
+        role={mobileRole} canWrite={canWrite} branding={state.branding} onLogout={() => fbLogout()} dataReady={dataReady}
         qrDeepLink={mahalDeepLink} onConsumeQrDeepLink={() => setMahalDeepLink(null)}
-        scannerOpen={scannerOpen} setScannerOpen={setScannerOpen} handleQrDecoded={handleQrDecoded} />
+        scannerOpen={scannerOpen} setScannerOpen={setScannerOpen} handleQrDecoded={handleQrDecoded}
+        canSwitchDept={canSwitchDept} deptOverride={testDeptOverride} onSetDeptOverride={setTestDeptOverride} />
     );
   }
 
@@ -315,7 +335,7 @@ export default function App() {
     operasyonlar: <Operasyonlar state={state} updateState={updateState} currentUser={currentUser.name} onOpenTask={editTask} pendingAction={pendingTaskAction} onConsumePending={() => setPendingTaskAction(null)} canWrite={canWrite("operasyonlar")} />,
     katplani: <KatPlani state={state} updateState={updateState} canWrite={canWrite("katplani")} />,
     varliklar: <Varliklar state={state} updateState={updateState} selectedId={selectedAssetId} onSelect={setSelectedAssetId} canWrite={canWrite("varliklar")} />,
-    bakim: <Teknik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("bakim")} mobileMode={isMobile} />,
+    bakim: <Teknik state={state} updateState={updateState} currentUser={currentUser.name} role={role} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("bakim")} mobileMode={isMobile} />,
     kontroller: <Kontroller state={state} updateState={updateState} currentUser={currentUser.name} canWrite={canWrite("kontroller")} />,
     guvenlik: <Guvenlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("guvenlik")} mobileMode={isMobile} />,
     temizlik: <Temizlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("temizlik")} mobileMode={isMobile} />,
@@ -325,6 +345,7 @@ export default function App() {
     raporlar: <Raporlar state={state} />,
     kpi: <Kpi state={state} />,
     yonetim: <Yonetim state={state} updateState={updateState} canWrite={canWrite("yonetim")} />,
+    mobiltasarim: <MobilTasarim state={state} updateState={updateState} />,
     ayarlar: <Ayarlar state={state} updateState={updateState} canWrite={canWrite("ayarlar")} />,
   };
 

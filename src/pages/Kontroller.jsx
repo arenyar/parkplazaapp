@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { T } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Input } from "../components/ui.jsx";
 import { getLocations, runFor, scheduleLabel, FillModal, buildMahalFillPatch, resolveMeters, hasNonConformity, NonConformityPanel, isShiftVisible, useNow } from "./MahalKontrol.jsx";
 
@@ -48,6 +48,7 @@ function pointStatus(point, state) {
 }
 
 function PointRow({ point, state, isExpanded, onToggle, onOpenFill, onOpenNonConformity }) {
+  const T = useTheme();
   const [q, setQ] = useState("");
   const st = pointStatus(point, state);
   const nc = hasNonConformity(point, state);
@@ -150,6 +151,7 @@ function locationLabelForRun(point, state, run) {
 // kontrolleri listeler) — mahalRuns'daki GERÇEK completedAt zaman damgasına
 // göre, uydurma/planlanan veri yok. Departman filtresi opsiyonel.
 function ControlCalendar({ state, onOpenFill }) {
+  const T = useTheme();
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
   const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() + 1 });
@@ -258,6 +260,7 @@ function ControlCalendar({ state, onOpenFill }) {
 }
 
 export function Kontroller({ state, updateState, currentUser }) {
+  const T = useTheme();
   const [view, setView] = useState("liste");
   const [expandedId, setExpandedId] = useState(null);
   const [fillTarget, setFillTarget] = useState(null);

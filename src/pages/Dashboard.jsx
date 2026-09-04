@@ -1,5 +1,6 @@
 import { AlertTriangle, Plus, QrCode, Wrench, ClipboardList, ClipboardCheck, FileWarning, Gauge, FileText, Building2, ChevronRight } from "lucide-react";
-import { T, STATUS, PRIORITY_STYLES, deptColor } from "../theme.js";
+import { STATUS, PRIORITY_STYLES, deptColor } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { Card, CardTitle, Button } from "../components/ui.jsx";
 import { computeAlerts } from "../lib/alerts.js";
 import { buildingStatusList, overallStatus } from "../lib/buildingStatus.js";
@@ -95,6 +96,7 @@ export const SECTION_LABELS = {
 // alt yazı+ok şeklindeki zengin kısayol kartları — mor tema yerine (kullanıcı
 // teyidiyle) departmanın kendi rengi (deptColor) kullanılıyor.
 function DeptShortcuts({ role, onShortcut, onGoTo }) {
+  const T = useTheme();
   const items = DEPT_SHORTCUTS[role];
   if (!items) return null;
   const accent = deptColor(role);
@@ -126,6 +128,7 @@ function DeptShortcuts({ role, onShortcut, onGoTo }) {
 }
 
 function StatChip({ icon: Icon, color, value, label }) {
+  const T = useTheme();
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "10px 6px", borderRadius: 10, background: T.surface2 }}>
       <div style={{ width: 30, height: 30, borderRadius: 8, background: `${color}26`, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -157,6 +160,7 @@ function StatusDot({ level }) {
 }
 
 export function Dashboard({ state, role, onGoTo, onNewTask, onScan, onOpenAlert, onShortcut = () => {} }) {
+  const T = useTheme();
   const scopedTasks = (!role || role === "Yönetim" ? state.tasks : state.tasks.filter((t) => t.department === role)).filter((t) => !t.archived);
   const openTasks = scopedTasks.filter((t) => t.status !== "Tamamlandı" && t.status !== "İptal");
   const critical = openTasks.filter((t) => t.priority === "Kritik");

@@ -33,12 +33,21 @@ export const PRIORITY_STYLES = {
   "Düşük": { bg: "#E7EEE9", fg: "#3F5B4F" },
 };
 
+// Faz 11 — görsel bütünlük: "Yönetim" burada mor (#6B4FA0) idi, yeni Talep
+// Yönetimi ekranıyla uyuşmuyordu (bkz. faz-6-11-prompt.md Faz 11 madde 1).
+// Diğer 5 departman renginden ayrışan, nötr-profesyonel bir slate/mavi-gri.
 export const DEPT_COLORS = {
   "Teknik": "#0F4D3A",
   "Güvenlik": "#DC5A34",
   "Temizlik": "#C9932E",
   "İSG": "#2F6FAE",
-  "Yönetim": "#6B4FA0",
+  "Yönetim": "#3E5C6B",
   "Resepsiyon": "#A3324B",
 };
 export function deptColor(d) { return DEPT_COLORS[d] || "#5B9BD9"; }
+
+// Faz 11 — assetIcons.js'teki iki mor ikon rengi (#B36BD4) yerine; ekipman
+// ikon paletinin geri kalanı zaten kendi anlamlı renklerini taşıyor (bkz.
+// assetIcons.js), bu ikisi de artık tek bir token'dan geliyor, satır-içi
+// hex kalmadı.
+export const equipmentAccent = "#3E5C6B";

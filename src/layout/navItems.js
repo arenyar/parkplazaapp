@@ -1,6 +1,6 @@
 import {
   LayoutGrid, Workflow, Package, Wrench, ClipboardCheck, ShieldCheck,
-  Sparkles, Zap, AlertOctagon, FileText, BarChart3, Gauge, Users, Settings2, Building2,
+  Sparkles, Zap, AlertOctagon, FileText, BarChart3, Gauge, Users, Settings2, Building2, Smartphone,
 } from "lucide-react";
 
 // Master prompt madde 16 — tam menü listesi. Fresh build olduğu için önceki
@@ -33,5 +33,6 @@ export const NAV_ITEMS = [
   { key: "raporlar", label: "Raporlar", icon: BarChart3, group: "Risk ve Rapor" },
   { key: "kpi", label: "KPI", icon: Gauge, group: "Risk ve Rapor" },
   { key: "yonetim", label: "Yönetim", icon: Users, group: "Yönetim" },
+  { key: "mobiltasarim", label: "Mobil Tasarım", icon: Smartphone, group: "Yönetim" },
   { key: "ayarlar", label: "Ayarlar", icon: Settings2, group: "Yönetim" },
 ];

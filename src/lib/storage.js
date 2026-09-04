@@ -1,5 +1,5 @@
 import { db } from "../firebase.js";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
 
 // Firebase Storage'ı açmak bu projede Google'ın ücretli Blaze planına
 // geçmeyi (kart eklemeyi) gerektiriyor — kullanıcı bunu açamadı ("hesap
@@ -87,4 +87,13 @@ export async function fetchPhoto(ref) {
   if (ref.startsWith("data:") || ref.startsWith("http")) return ref;
   const snap = await getDoc(doc(db, "appdata", ref));
   return snap.exists() ? snap.data().dataUrl : null;
+}
+
+// Faz 15 — profil fotoğrafı değiştiğinde eskisi silinir, birikmez (spec).
+// Eski referans data:/http (eski/geriye dönük bir kayıt) ise ya da hiç
+// yoksa sessizce hiçbir şey yapmaz — sadece bu depoda GERÇEKTEN kendi
+// oluşturduğumuz `pp_photo_*` belgeleri silinir.
+export async function deletePhoto(ref) {
+  if (!ref || ref.startsWith("data:") || ref.startsWith("http")) return;
+  try { await deleteDoc(doc(db, "appdata", ref)); } catch { /* zaten silinmiş/erişilemez olabilir — sessizce geç */ }
 }

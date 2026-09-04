@@ -181,7 +181,7 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
             <Field label="Sorumlu Personel">
               <Select value={form.assignee} onChange={(e) => setForm((f) => ({ ...f, assignee: e.target.value }))}>
                 <option value="">Personel seçin</option>
-                {state.team.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                {state.team.filter((t) => !form.department || t.department === form.department).map((t) => <option key={t.id} value={t.name}>{t.name} · {t.role}</option>)}
               </Select>
             </Field>
             <Field label="Başlama Tarihi"><Input type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} /></Field>
@@ -319,7 +319,7 @@ export function Operasyonlar({ state, updateState, currentUser, onOpenTask, pend
         <div>
           <PageHeader title="Görev Akışı" subtitle="Sadece Talep/Şikayet iş emirleri — Mahal Kontrol, Planlı Bakım ve Arıza Kayıtları burada gösterilmez" />
           {formOpen && canWrite && (
-            <TaskForm form={form} setForm={setForm} departments={state.departments} onSave={saveTask} onCancel={() => setFormOpen(false)} />
+            <TaskForm form={form} setForm={setForm} departments={state.departments} types={state.taskTypes} team={state.team} onSave={saveTask} onCancel={() => setFormOpen(false)} />
           )}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${STATUSES.length}, minmax(220px,1fr))`, gap: 14, overflowX: "auto" }}>
             {STATUSES.map((status) => {

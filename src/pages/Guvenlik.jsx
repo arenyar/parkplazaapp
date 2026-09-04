@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import { Plus, X, PenLine } from "lucide-react";
-import { T } from "../theme.js";
+import { useState, useEffect, useRef } from "react";
+import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff } from "lucide-react";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button, Field, Input, Select, TextArea } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
@@ -8,7 +8,11 @@ import { MobileTaskList } from "../components/MobileTaskList.jsx";
 import { SignaturePad } from "../components/SignaturePad.jsx";
 import { fmtDateTime } from "../lib/format.js";
 import { MahalKontrol } from "./MahalKontrol.jsx";
-import { uploadDataUrl } from "../lib/storage.js";
+import { uploadDataUrl, uploadPhoto } from "../lib/storage.js";
+import { findDeptManager } from "../mockData.js";
+import { openMailto } from "../lib/mailto.js";
+import { showToast } from "../lib/toast.js";
+import { PrintHeader } from "../components/PrintDocument.jsx";
 import StoredImage from "../components/StoredImage.jsx";
 
 const TABS = [
@@ -20,15 +24,23 @@ const TABS = [
 // Vardiya seçenekleri kağıt tutanaktaki üç sabit dilimle birebir aynı.
 const SHIFTS = ["08.00 – 16.00", "16.00 – 24.00", "24.00 – 08.00"];
 
-// Kağıt "Olay Tutanağı" formundaki dört imza kutusu — sırası ve etiketleri
-// görseldeki tabloyla birebir aynı (iki Güvenlik Görevlisi ayrı kutu, sonra
-// Tanık, sonra Şef/Vardiya Sorumlusu).
-const SIGNATURE_ROLES = ["Güvenlik Görevlisi", "Güvenlik Görevlisi", "Tanık", "Şef/Vardiya Sorumlusu"];
+// Kullanıcı teyidiyle: "3 imza olacak... vardiya amirleri 1 güvenlik
+// personeli ile hazırladığı tutanağı güvenlik müdürüne onaya sunsun,
+// imzasını alsın, çıktısını o alsın" — tutanağı hazırlayan vardiya amiri +
+// güvenlik personeli oluşturma formunda imzalar; 3. kutu (Güvenlik Müdürü
+// onay imzası) BOŞ kaydedilir, müdür daha sonra kaydı açıp aşağıdaki
+// "İmza Bekleyenler" alanından kendi imzasını ekler (bkz. IncidentReportView).
+const SIGNATURE_ROLES = ["Vardiya Amiri", "Güvenlik Görevlisi", "Güvenlik Müdürü (Onay)"];
+
+// Kullanıcı teyidiyle: "olay tutanağında görsel ekle olsun 2 resim
+// ekleyebilsin" — tek slot yerine sabit 2 slotluk dizi.
+const MAX_INCIDENT_PHOTOS = 2;
 
 function emptyIncidentForm() {
   return {
     tarih: new Date().toISOString().slice(0, 10), saat: new Date().toTimeString().slice(0, 5), location: "", shift: "", description: "",
     signatures: SIGNATURE_ROLES.map((role) => ({ role, name: "", signature: null })),
+    photoUrls: [],
   };
 }
 
@@ -36,8 +48,50 @@ function emptyIncidentForm() {
 // burada da department="Güvenlik" ile aynı bileşenleri kullanıyor, ayrı bir
 // kopya yok. Görevler sekmesi Operasyonlar'daki Talep/Şikayet modülünden bu
 // departmana atanan kayıtları da (aynı state.tasks üzerinden) gösterir.
+// Faz 13 — Teknik.jsx'teki aynı sorun burada da vardı: mobilde üst sekme
+// şeridi tamamen gizli (aşağıda), yani deepLink'siz açılışta varsayılan
+// "devriye" sekmesi (4 imzalı resmi Olay Tutanağı + iki sütunlu masaüstü
+// düzeni) sahadaki kullanıcıyı MAHSUR bırakırdı. Gerçek istenen ekran
+// "Güvenlik Devriye" (mahal) sekmesi.
+const MOBILE_DEFAULT_TAB = "mahal";
+
+// Kullanıcı teyidiyle: "olay tutanağını yazdırırken yapay zeka destekli
+// olsun mikrofondan sesli tutanağı anlatsın" — bu depoda hiç AI/backend
+// entegrasyonu yok (yalnız Firebase), kullanıcı onayıyla kapsam sadece
+// tarayıcının yerleşik konuşma tanıma özelliğine (Web Speech API) indirildi:
+// gerçek zamanlı dikte metne çevrilip Açıklamalar kutusuna eklenir, ekstra
+// bir AI/API çağrısı ya da anahtar YOKTUR. Chrome/Edge destekler; Safari/
+// Firefox'ta API yoksa buton kullanıcıya toast ile bilgi verir.
+function useSpeechDictation(onFinalText) {
+  const recRef = useRef(null);
+  const [listening, setListening] = useState(false);
+  function toggle() {
+    if (listening) { recRef.current?.stop(); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showToast("Tarayıcınız sesli dikteyi desteklemiyor — Chrome veya Edge kullanın.", "error"); return; }
+    const rec = new SR();
+    rec.lang = "tr-TR";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      let text = "";
+      for (let idx = e.resultIndex; idx < e.results.length; idx++) {
+        if (e.results[idx].isFinal) text += e.results[idx][0].transcript;
+      }
+      if (text.trim()) onFinalText(text.trim());
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    rec.start();
+    recRef.current = rec;
+    setListening(true);
+  }
+  return { listening, toggle };
+}
+
 export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
-  const [tab, setTab] = useState("devriye");
+  const T = useTheme();
+  const [tab, setTab] = useState(mobileMode ? MOBILE_DEFAULT_TAB : "devriye");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyIncidentForm());
   const [viewIncident, setViewIncident] = useState(null);
@@ -59,7 +113,22 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (targetTab !== "mahal") onConsumeDeepLink();
   }, [deepLink]);
 
+  const dictation = useSpeechDictation((text) => {
+    setForm((f) => ({ ...f, description: f.description ? `${f.description} ${text}` : text }));
+  });
   const [signing, setSigning] = useState(false);
+  const [incidentPhotoFiles, setIncidentPhotoFiles] = useState([null, null]);
+  const [incidentPhotoPreviews, setIncidentPhotoPreviews] = useState([null, null]);
+  function handleIncidentPhoto(slot, e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIncidentPhotoFiles((arr) => arr.map((f, idx) => (idx === slot ? file : f)));
+    setIncidentPhotoPreviews((arr) => arr.map((p, idx) => (idx === slot ? URL.createObjectURL(file) : p)));
+  }
+  function removeIncidentPhoto(slot) {
+    setIncidentPhotoFiles((arr) => arr.map((f, idx) => (idx === slot ? null : f)));
+    setIncidentPhotoPreviews((arr) => arr.map((p, idx) => (idx === slot ? null : p)));
+  }
   function updateSignature(i, patch) {
     setForm((f) => ({ ...f, signatures: f.signatures.map((s, idx) => (idx === i ? { ...s, ...patch } : s)) }));
   }
@@ -74,6 +143,7 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (!form.description.trim()) return;
     setSigning(true);
     let signatures = form.signatures;
+    let photoUrls = [];
     try {
       signatures = await Promise.all(form.signatures.map(async (s) => {
         if (!s.signature || !s.signature.startsWith("data:")) return s;
@@ -84,13 +154,33 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
           return s;
         }
       }));
+      // Kullanıcı teyidiyle: "Olay Tutanağında görsel var ise 2. sayfaya ek
+      // olarak göster" — görsel opsiyonel, tutanağın kendisi görsel yokluğuna
+      // bakmadan kaydedilir (aşağıdaki try/catch bunu garantiliyor).
+      const uploaded = await Promise.all(incidentPhotoFiles.map(async (file) => {
+        if (!file) return null;
+        try { return await uploadPhoto(file, "olay-fotograflari"); }
+        catch (err) { console.error("Fotoğraf yüklenemedi:", err); return null; }
+      }));
+      photoUrls = uploaded.filter(Boolean);
     } finally {
       setSigning(false);
     }
-    const incidents = [{ id: `i_${Date.now()}`, ...form, signatures, reportedBy: currentUser, at: new Date().toISOString() }, ...state.incidents];
+    const incidents = [{ id: `i_${Date.now()}`, ...form, signatures, photoUrls, reportedBy: currentUser, at: new Date().toISOString() }, ...state.incidents];
     updateState({ incidents });
     setForm(emptyIncidentForm());
+    setIncidentPhotoFiles([null, null]);
+    setIncidentPhotoPreviews([null, null]);
     setFormOpen(false);
+  }
+  // Kullanıcı teyidiyle: "vardiya amirleri... hazırladığı tutanağı güvenlik
+  // müdürüne onaya sunsun, imzasını alsın" — müdür kaydı açtığında BOŞ kalan
+  // imza kutusuna (bkz. IncidentReportView "İmza Bekleyenler") kendi
+  // imzasını ekleyebilir; burada tutanak güncellenir ve açık modal da (varsa)
+  // eşitlenir.
+  function saveIncidentSignature(incidentId, signatures) {
+    updateState({ incidents: state.incidents.map((inc) => (inc.id === incidentId ? { ...inc, signatures } : inc)) });
+    setViewIncident((v) => (v && v.id === incidentId ? { ...v, signatures } : v));
   }
 
   const guardOptions = state.team.filter((t) => t.department === "Güvenlik");
@@ -129,6 +219,24 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
+      {/* Düzeltme: "Olaylar" (resmi 4 imzalı Olay Tutanağı + geçmiş olay
+          kayıtları listesi) masaüstünde vardı ve varsayılan sekimdi — mobil
+          toggle'a ilk yazımda alınmamıştı, bu da o ekranı mobilde tamamen
+          erişilemez hale getirmişti (kullanıcı teyidiyle bulunan hata).
+          MahalKontrol'ün "Olay Bildir" hızlı formu bunun YERİNE değil,
+          YANINDA — imzalı resmi tutanak hâlâ burada. */}
+      {mobileMode && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[{ key: "mahal", label: "Devriye" }, { key: "devriye", label: "Olaylar" }, { key: "gorevler", label: "Görevler" }].map((tb) => (
+            <button key={tb.key} onClick={() => setTab(tb.key)}
+              style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
+                background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>
+              {tb.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {tab === "devriye" && (
         <div>
           <PageHeader title="Devriye & Olaylar" subtitle="Devriye turları ve olay kayıtları" right={canWrite && <Button onClick={() => { setForm(emptyIncidentForm()); setFormOpen((s) => !s); }}>Olay Bildir</Button>} />
@@ -150,7 +258,35 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
                   ))}
                 </div>
               </Field>
-              <Field label="Açıklamalar" required><TextArea style={{ width: "100%", minHeight: 140 }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+              <Field label="Açıklamalar" required right={
+                <button type="button" onClick={dictation.toggle} title={dictation.listening ? "Dikteyi durdur" : "Mikrofonla anlat"}
+                  style={{ display: "flex", alignItems: "center", gap: 5, border: "none", borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", textTransform: "none", letterSpacing: 0, background: dictation.listening ? "#DC5A34" : T.accent, color: dictation.listening ? "#fff" : "#0B1420" }}>
+                  {dictation.listening ? <MicOff size={12} /> : <Mic size={12} />}
+                  {dictation.listening ? "Dinliyor…" : "Sesle anlat"}
+                </button>
+              }>
+                <TextArea style={{ width: "100%", minHeight: 140 }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+              </Field>
+
+              <Field label={`Fotoğraflar (opsiyonel, en fazla ${MAX_INCIDENT_PHOTOS})`}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 }}>
+                  {[0, 1].map((slot) => (
+                    <div key={slot}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, border: `1px dashed ${T.line}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer", color: T.dim, fontSize: 12.5 }}>
+                        <Camera size={15} />
+                        {incidentPhotoFiles[slot] ? "Fotoğraf seçildi ✓" : `Fotoğraf ${slot + 1} çek / seç`}
+                        <input type="file" accept="image/*" capture="environment" onChange={(e) => handleIncidentPhoto(slot, e)} style={{ display: "none" }} />
+                      </label>
+                      {incidentPhotoPreviews[slot] && (
+                        <div style={{ position: "relative", marginTop: 6 }}>
+                          <img src={incidentPhotoPreviews[slot]} alt="Önizleme" style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8 }} />
+                          <button type="button" onClick={() => removeIncidentPhoto(slot)} style={{ position: "absolute", top: 4, right: 4, border: "none", borderRadius: 999, width: 22, height: 22, background: "rgba(0,0,0,0.55)", color: "#fff", cursor: "pointer" }}><X size={13} /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Field>
 
               <div style={{ fontSize: 11, color: T.dim, margin: "16px 0 10px" }}>
                 İş bu tutanak tarafımızca tanzim edilerek imza altına alınmıştır. {form.tarih ? new Date(form.tarih).toLocaleDateString("tr-TR") : "…"}
@@ -226,31 +362,97 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Güvenlik departmanının işleri ve firma talepleri`}
               right={canWrite && <Button icon={Plus} onClick={startNewTask}>Yeni Görev</Button>} />
             {taskFormOpen && (
-              <TaskForm form={taskForm} setForm={setTaskForm} lockDepartment="Güvenlik" onSave={saveTask} onCancel={() => setTaskFormOpen(false)} />
+              <TaskForm form={taskForm} setForm={setTaskForm} lockDepartment="Güvenlik" types={state.taskTypes} team={state.team} onSave={saveTask} onCancel={() => setTaskFormOpen(false)} />
             )}
             <TaskList tasks={deptTasks} onEdit={startEditTask} onDelete={removeTask} showDept={false} emptyText="Kayıt yok." canWrite={canWrite} />
           </div>
         )
       )}
 
-      {viewIncident && <IncidentReportView incident={viewIncident} onClose={() => setViewIncident(null)} />}
+      {viewIncident && (
+        <IncidentReportView incident={viewIncident} team={state.team} branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl}
+          canWrite={canWrite} onSignatureSaved={saveIncidentSignature} onClose={() => setViewIncident(null)} />
+      )}
     </div>
   );
 }
 
 // Kağıt tutanağın salt-okunur ekran görünümü — kaydedilen imzalar (varsa)
 // dahil, form neyse aynı düzende gösterilir.
-function IncidentReportView({ incident: i, onClose }) {
+// Kullanıcı teyidiyle: "olay tutanağının çıktısının alınması lazım pdf
+// olarak kaydet yada formu yöneticiye gönder... güvenlik müdürüne atsın" —
+// yazdırma, Mahal Kontrol/Raporlar'daki İLE AYNI kanıtlanmış mekanizma
+// (window.print + .invoice-print-area, bkz. GlobalStyle.jsx @media print) —
+// yeni bir PDF kütüphanesi eklenmedi. "Gönder" gerçek otomatik e-posta
+// DEĞİL (bu depoda hiç e-posta/backend altyapısı yok) — kullanıcının kendi
+// e-posta istemcisini müdürün adresi, konu ve özet gövdeyle ÖNCEDEN
+// DOLDURULMUŞ açar (bkz. lib/mailto.js); PDF eki tarayıcı güvenlik modeli
+// gereği otomatik eklenemez, "Yazdır / PDF Kaydet" ile kaydedilip elle
+// eklenir — kullanıcıya bu akış toast ile açıkça söylenir.
+// Kullanıcı teyidiyle: "formda imza olmasa bile imza yerini aç" — eski
+// `(i.signatures || [])` boşsa (ya da eski, henüz görsel/imza alanı olmayan
+// bir kayıtsa) HİÇ kutu göstermiyordu; artık SIGNATURE_ROLES'a göre en az
+// boş kutular her zaman basılıyor.
+function IncidentReportView({ incident: i, team, branding, logoUrl, canWrite, onSignatureSaved, onClose }) {
+  function print() { setTimeout(() => window.print(), 60); }
+  const manager = findDeptManager(team, "Güvenlik");
+  const guardOptions = team.filter((t) => t.department === "Güvenlik");
+  const signatures = i.signatures && i.signatures.length > 0 ? i.signatures : SIGNATURE_ROLES.map((role) => ({ role, name: "", signature: null }));
+  const photoUrls = i.photoUrls && i.photoUrls.length > 0 ? i.photoUrls : (i.photoUrl ? [i.photoUrl] : []);
+  const printDate = i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "—";
+
+  // Kullanıcı teyidiyle: "vardiya amirleri... hazırladığı tutanağı güvenlik
+  // müdürüne onaya sunsun, imzasını alsın" — bu bölüm HİÇ yazdırılmaz
+  // (.no-print, .invoice-print-area DIŞINDA), sadece boş kalan kutulara imza
+  // eklemek için ekran içi araç. İmza atılınca `signatures` state'e/DB'ye
+  // yazılır ve yukarıdaki basılı kutu otomatik doluyla güncellenir.
+  const [pendingIdx, setPendingIdx] = useState(null);
+  const [pendingName, setPendingName] = useState("");
+  const [pendingManual, setPendingManual] = useState(false);
+  const [pendingSig, setPendingSig] = useState(null);
+  const [savingSig, setSavingSig] = useState(false);
+  function startSigning(idx) { setPendingIdx(idx); setPendingName(""); setPendingManual(false); setPendingSig(null); }
+  function cancelSigning() { setPendingIdx(null); setPendingName(""); setPendingManual(false); setPendingSig(null); }
+  async function saveSignature(idx) {
+    if (!pendingSig || !pendingName.trim()) return;
+    setSavingSig(true);
+    try {
+      const url = await uploadDataUrl(pendingSig, "imzalar");
+      const updated = signatures.map((s, si) => (si === idx ? { ...s, name: pendingName, signature: url } : s));
+      onSignatureSaved(i.id, updated);
+      cancelSigning();
+    } catch (err) {
+      console.error("İmza yüklenemedi:", err);
+      alert("İmza yüklenemedi, tekrar deneyin: " + err.message);
+    } finally {
+      setSavingSig(false);
+    }
+  }
+  // Raporlar.jsx'teki ReportPage ile AYNI A4 ölçüleri — kullanıcı teyidiyle
+  // "formların sabit olması... kurumsal bir yapı" tüm belgelerde aynı sayfa
+  // boyutunu/boşluğunu istiyor, her belge kendi ölçüsünü uydurmadı.
+  const pageStyle = { background: "#fff", color: "#1a1a1a", width: "190mm", minHeight: "160mm", margin: "0 auto 10mm", padding: "14mm", fontFamily: "Arial, Helvetica, sans-serif", boxSizing: "border-box" };
+  function sendToManager() {
+    if (!manager) { showToast("Güvenlik departmanında (Şef/Sorumlu rolünde, e-postası kayıtlı) bir yönetici bulunamadı.", "error"); return; }
+    showToast("E-posta taslağı açıldı — PDF'i önce \"Yazdır / PDF Kaydet\" ile kaydedip ek olarak eklemeyi unutmayın.", "info");
+    openMailto({
+      to: manager.email,
+      subject: `Olay Tutanağı — ${i.location || "—"} · ${i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "—"}`,
+      body: `${branding?.siteName || "Park Plaza"} — Olay Tutanağı\n\nTarih: ${i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "—"}\nSaat: ${i.saat || "—"}\nYer: ${i.location || "—"}\nVardiya: ${i.shift || "—"}\n\nAçıklama:\n${i.description || "—"}\n\nKaydeden: ${i.reportedBy || "—"}\n\n(Tutanağın PDF çıktısını bu e-postaya elle ekleyin — "Yazdır / PDF Kaydet" ile önce kaydedin.)`,
+    });
+  }
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 560, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", padding: "24px 26px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div className="no-print" style={{ display: "flex", justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
         </div>
-        <h2 style={{ textAlign: "center", margin: "0 0 18px", fontSize: 16, fontWeight: 700, color: "#132A20", letterSpacing: 0.5 }}>OLAY TUTANAĞI</h2>
+        <div className="invoice-print-area">
+        <div className="fatura-sayfa" style={pageStyle}>
+        <PrintHeader branding={branding} logoUrl={logoUrl} docTitle="OLAY TUTANAĞI" docSubtitle={printDate} />
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 18 }}>
           <tbody>
-            <tr><td style={{ padding: "6px 10px", fontWeight: 700, border: "1px solid #E3DFD1", width: 120 }}>TARİH</td><td style={{ padding: "6px 10px", border: "1px solid #E3DFD1" }}>{i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "—"}</td></tr>
+            <tr><td style={{ padding: "6px 10px", fontWeight: 700, border: "1px solid #E3DFD1", width: 120 }}>TARİH</td><td style={{ padding: "6px 10px", border: "1px solid #E3DFD1" }}>{printDate}</td></tr>
             <tr><td style={{ padding: "6px 10px", fontWeight: 700, border: "1px solid #E3DFD1" }}>SAAT</td><td style={{ padding: "6px 10px", border: "1px solid #E3DFD1" }}>{i.saat || "—"}</td></tr>
             <tr><td style={{ padding: "6px 10px", fontWeight: 700, border: "1px solid #E3DFD1" }}>YER</td><td style={{ padding: "6px 10px", border: "1px solid #E3DFD1" }}>{i.location || "—"}</td></tr>
             <tr><td style={{ padding: "6px 10px", fontWeight: 700, border: "1px solid #E3DFD1" }}>VARDİYA SAATİ</td><td style={{ padding: "6px 10px", border: "1px solid #E3DFD1" }}>{i.shift || "—"}</td></tr>
@@ -258,12 +460,13 @@ function IncidentReportView({ incident: i, onClose }) {
         </table>
         <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>Açıklamalar</div>
         <p style={{ fontSize: 13, color: "#132A20", whiteSpace: "pre-wrap", border: "1px solid #E3DFD1", borderRadius: 8, padding: 12, minHeight: 80 }}>{i.description}</p>
+        {photoUrls.length > 0 && <p style={{ fontSize: 10.5, color: "#8a8879", margin: "10px 0 0" }}>{photoUrls.length > 1 ? "Olay fotoğrafları ek sayfada" : "Olay fotoğrafı ek sayfada"} — bkz. 2. sayfa.</p>}
 
         <p style={{ fontSize: 11, color: "#8a8879", margin: "16px 0 10px" }}>
-          İş bu tutanak tarafımızca tanzim edilerek imza altına alınmıştır. {i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "…"}
+          İş bu tutanak tarafımızca tanzim edilerek imza altına alınmıştır. {printDate}
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
-          {(i.signatures || []).map((s, idx) => (
+          {signatures.map((s, idx) => (
             <div key={idx} style={{ border: "1px solid #E3DFD1", borderRadius: 10, padding: 10, textAlign: "center" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>{s.role}</div>
               {s.signature ? <StoredImage src={s.signature} alt="İmza" style={{ width: "100%", height: 70, objectFit: "contain" }} /> : (
@@ -274,7 +477,69 @@ function IncidentReportView({ incident: i, onClose }) {
           ))}
         </div>
         <div style={{ fontSize: 10.5, color: "#8a8879", marginTop: 16 }}>Kaydeden: {i.reportedBy} · {fmtDateTime(i.at)}</div>
-        <Button variant="quiet" style={{ width: "100%", marginTop: 16, justifyContent: "center" }} onClick={onClose}>Kapat</Button>
+        </div>
+        {/* Kullanıcı teyidiyle: "Olay Tutanağında görsel var ise 2. sayfaya ek
+            olarak göster... 3 imza olacak yani mümkün mertebe görseller çok
+            büyük olmasın" — görsel yoksa bu blok hiç render edilmez, ekstra
+            boş sayfa basılmaz; en fazla 2 fotoğraf AYNI ek sayfada, orta
+            boyda (500 yerine ~210px) yan yana/alt alta sığacak şekilde. */}
+        {photoUrls.length > 0 && (
+          <div className="fatura-sayfa" style={pageStyle}>
+            <PrintHeader branding={branding} logoUrl={logoUrl} docTitle={photoUrls.length > 1 ? "Olay Fotoğrafları" : "Olay Fotoğrafı"} docSubtitle={printDate} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {photoUrls.map((url, idx) => (
+                <img key={idx} src={url} alt={`Olay fotoğrafı ${idx + 1}`} style={{ width: "100%", maxHeight: 210, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8 }} />
+              ))}
+            </div>
+          </div>
+        )}
+        </div>
+
+        {canWrite && signatures.some((s) => !s.signature) && (
+          <div className="no-print" style={{ marginTop: 16, borderTop: "1px solid #E3DFD1", paddingTop: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 8 }}>İmza Bekleyenler</div>
+            {signatures.map((s, idx) => {
+              if (s.signature) return null;
+              if (pendingIdx !== idx) {
+                return (
+                  <Button key={idx} variant="ghost" style={{ width: "100%", justifyContent: "center", marginBottom: 8 }} onClick={() => startSigning(idx)}>{s.role} — İmza Al</Button>
+                );
+              }
+              const isKnown = guardOptions.some((t) => t.name === pendingName);
+              const manualMode = pendingManual || (pendingName && !isKnown);
+              return (
+                <div key={idx} style={{ border: "1px solid #E3DFD1", borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>{s.role}</div>
+                  <Select value={manualMode ? "__manual__" : pendingName} onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "__manual__") { setPendingManual(true); setPendingName(""); }
+                    else { setPendingManual(false); setPendingName(val); }
+                  }} style={{ width: "100%", boxSizing: "border-box", marginBottom: manualMode ? 6 : 8 }}>
+                    <option value="">Personel seçin</option>
+                    {guardOptions.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                    <option value="__manual__">Listede yok — elle yaz</option>
+                  </Select>
+                  {manualMode && (
+                    <Input placeholder="Adı Soyadı" value={pendingName} onChange={(e) => setPendingName(e.target.value)} style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }} />
+                  )}
+                  <SignaturePad value={pendingSig} onChange={setPendingSig} height={90} />
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <Button disabled={!pendingSig || !pendingName.trim() || savingSig} onClick={() => saveSignature(idx)} style={{ flex: 1, justifyContent: "center" }}>{savingSig ? "Kaydediliyor…" : "İmzayı Kaydet"}</Button>
+                    <Button variant="quiet" onClick={cancelSigning}>Vazgeç</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="no-print" style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Button icon={Printer} style={{ flex: 1, justifyContent: "center" }} onClick={print}>Yazdır / PDF Kaydet</Button>
+          <Button icon={Send} variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={sendToManager} title={manager ? `${manager.name} (${manager.email})` : "Güvenlik müdürü bulunamadı"}>
+            Müdüre Gönder
+          </Button>
+        </div>
+        <Button variant="quiet" style={{ width: "100%", marginTop: 8, justifyContent: "center" }} onClick={onClose}>Kapat</Button>
       </div>
     </div>
   );

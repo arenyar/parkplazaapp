@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Eye, EyeOff, ArrowLeft, Smartphone } from "lucide-react";
-import { T } from "../theme.js";
+import { mobileUiTheme as T } from "../mobile/tokens.js";
+import { ThemeContext } from "../lib/ThemeContext.jsx";
 import { Button, Input, Field } from "../components/ui.jsx";
 import { login, resetPasswordEmail } from "../firebase.js";
 import { authErrorMessage } from "../lib/authErrors.js";
@@ -52,14 +53,15 @@ export function MobileLogin({ branding, onLoggedIn }) {
   }
 
   return (
+    <ThemeContext.Provider value={T}>
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", justifyContent: "center", padding: "24px 20px", boxSizing: "border-box" }}>
       <div style={{ width: "100%", maxWidth: 360, margin: "0 auto" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 30 }}>
           <div style={{ width: 52, height: 52, borderRadius: 16, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Smartphone size={24} color="#0B1420" strokeWidth={2} />
+            <Smartphone size={24} color={T.onAccent ?? "#fff"} strokeWidth={2} />
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "#fff", letterSpacing: 0.3 }}>{branding.orgName} Saha Uygulaması</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: T.ink, letterSpacing: 0.3 }}>{branding.orgName} Saha Uygulaması</div>
             <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2 }}>{branding.siteName}</div>
           </div>
         </div>
@@ -126,5 +128,6 @@ export function MobileLogin({ branding, onLoggedIn }) {
         </div>
       </div>
     </div>
+    </ThemeContext.Provider>
   );
 }

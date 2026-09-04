@@ -75,7 +75,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Temizlik departmanının işleri ve firma talepleri`}
               right={canWrite && <Button icon={Plus} onClick={startNew}>Yeni Görev</Button>} />
             {formOpen && canWrite && (
-              <TaskForm form={form} setForm={setForm} lockDepartment="Temizlik" onSave={save} onCancel={() => setFormOpen(false)} />
+              <TaskForm form={form} setForm={setForm} lockDepartment="Temizlik" types={state.taskTypes} team={state.team} onSave={save} onCancel={() => setFormOpen(false)} />
             )}
             <TaskList tasks={deptTasks} onEdit={startEdit} onDelete={remove} showDept={false} emptyText="Kayıt yok." canWrite={canWrite} />
           </div>

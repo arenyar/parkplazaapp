@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Camera } from "lucide-react";
-import { T } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { Field, Select, TextArea, Button } from "./ui.jsx";
 import { TASK_STATUSES } from "./TaskForm.jsx";
 import { uploadPhoto } from "../lib/storage.js";
@@ -14,6 +14,7 @@ import StoredImage from "./StoredImage.jsx";
 // Açıklama + Durum + opsiyonel fotoğraf düzenlenebilir, geri kalan alanlar
 // (bilet no, firma/konum, termin) salt-okunur bağlam olarak gösterilir.
 export function MobileTaskCard({ task, onSave, onClose }) {
+  const T = useTheme();
   const [status, setStatus] = useState(task.status);
   const [description, setDescription] = useState(task.description);
   const [resolution, setResolution] = useState(task.resolution || "");

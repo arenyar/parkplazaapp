@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { T, PRIORITY_STYLES } from "../theme.js";
+import { PRIORITY_STYLES } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { MobileTaskCard } from "./MobileTaskCard.jsx";
 
 // Kullanıcı teyidiyle: "Görevlere Tıkladığında sadece ilgili görevin kartı
@@ -7,6 +8,7 @@ import { MobileTaskCard } from "./MobileTaskCard.jsx";
 // TaskForm açan) mobil karşılığı: kart nereye dokunursa dokunsun açılır,
 // silme YOK (mobil = sadece veri girişi).
 export function MobileTaskList({ tasks, onSaveTask, emptyText = "Kayıt yok." }) {
+  const T = useTheme();
   const [editing, setEditing] = useState(null);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

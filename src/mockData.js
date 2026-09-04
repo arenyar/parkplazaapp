@@ -14,6 +14,34 @@ export const BRANDING = {
 
 export const DEPARTMENTS = ["Teknik", "Güvenlik", "Temizlik", "İSG", "Yönetim", "Resepsiyon"];
 
+// Faz 2 — hiyerarşik talep türü taksonomisi (bkz. mobil-ui-prompt.md bölüm
+// 6.5, örnek ağaç). Koda gömülü sabit bir liste değil gibi davranılır:
+// `parentId` ile ağaç kurulur, `order` ile sıralanır, `isLeaf` sadece
+// seçilebilir yapraklarda true — TypePicker.jsx bu şekli okur. Bu depoda
+// ayrı bir Firestore koleksiyonu yok (appdata tek doküman, bkz. firebase.js);
+// o yüzden `taskTypes/{id}` yerine diğer tüm referans verilerle (DEPARTMENTS,
+// MAINTENANCE_FIRMS...) aynı yerde, `state.taskTypes` dizisi olarak tutulur.
+export const TASK_TYPES = [
+  { id: "elektrik", parentId: null, order: 1, label: "Elektrik", isLeaf: true },
+  { id: "mekanik", parentId: null, order: 2, label: "Mekanik / Tesisat", isLeaf: false },
+  { id: "mekanik-atiksu", parentId: "mekanik", order: 1, label: "Atık su borusu arızalı", isLeaf: true },
+  { id: "mekanik-isitma", parentId: "mekanik", order: 2, label: "Isıtma", isLeaf: true },
+  { id: "mekanik-lavabo", parentId: "mekanik", order: 3, label: "Lavabo", isLeaf: true },
+  { id: "mekanik-suborusu", parentId: "mekanik", order: 4, label: "Su borusu arızalı", isLeaf: true },
+  { id: "mekanik-subaskini", parentId: "mekanik", order: 5, label: "Su baskını", isLeaf: true },
+  { id: "mekanik-wc", parentId: "mekanik", order: 6, label: "WC", isLeaf: false },
+  { id: "mekanik-wc-kapak-arizali", parentId: "mekanik-wc", order: 1, label: "WC kapağı arızalı", isLeaf: true },
+  { id: "mekanik-wc-kapak-gevsek", parentId: "mekanik-wc", order: 2, label: "WC kapağı gevşek", isLeaf: true },
+  { id: "mekanik-wc-rezervuar", parentId: "mekanik-wc", order: 3, label: "Rezervuar akıtıyor", isLeaf: true },
+  { id: "mekanik-wc-tikali", parentId: "mekanik-wc", order: 4, label: "WC tıkalı", isLeaf: true },
+  { id: "yangin-guvenlik", parentId: null, order: 3, label: "Yangın ve güvenlik", isLeaf: true },
+  { id: "asansor", parentId: null, order: 4, label: "Asansör", isLeaf: true },
+  { id: "bilgi-islem", parentId: null, order: 5, label: "Bilgi işlem", isLeaf: true },
+  { id: "mobilya-donanim", parentId: null, order: 6, label: "Mobilya / Donanım", isLeaf: true },
+  { id: "boya-tadilat", parentId: null, order: 7, label: "Boya / Tadilat", isLeaf: true },
+  { id: "peyzaj", parentId: null, order: 8, label: "Peyzaj", isLeaf: true },
+];
+
 // Bakım Takvimi'ndeki (MAINTENANCE_ITEMS) "firma" alanlarında geçen bakım
 // yüklenicileri — Ayarlar > Bakımlar sekmesinden yönetilir.
 export const MAINTENANCE_FIRMS = ["Otis", "Trak", "Hertz Jeneratör", "Schneider", "EKA", "Nalco", "İnform"];
@@ -41,7 +69,7 @@ export const MAINTENANCE_FIRMS = ["Otis", "Trak", "Hertz Jeneratör", "Schneider
 // departman liderlerine Kontroller/Raporlar/KPI gibi yönetimsel ekranlar da
 // varsayılan olarak açık; Yönetim departmanı (Facility Manager + Yönetim
 // Personeli) tüm ekranlara erişir.
-const ALL_SCREENS = ["dashboard", "operasyonlar", "katplani", "varliklar", "bakim", "kontroller", "guvenlik", "temizlik", "enerji", "riskler", "dokumanlar", "raporlar", "kpi", "yonetim", "ayarlar"];
+const ALL_SCREENS = ["dashboard", "operasyonlar", "katplani", "varliklar", "bakim", "kontroller", "guvenlik", "temizlik", "enerji", "riskler", "dokumanlar", "raporlar", "kpi", "yonetim", "ayarlar", "mobiltasarim"];
 const DEPARTMENT_DEFAULT_SCREENS = {
   "Teknik": ["dashboard", "operasyonlar", "katplani", "varliklar", "bakim", "enerji", "riskler", "dokumanlar"],
   "Güvenlik": ["dashboard", "operasyonlar", "katplani", "guvenlik", "dokumanlar"],
@@ -51,11 +79,21 @@ const DEPARTMENT_DEFAULT_SCREENS = {
   "Resepsiyon": ["dashboard", "operasyonlar", "katplani", "dokumanlar"],
 };
 const LEAD_EXTRA_SCREENS = ["kontroller", "raporlar", "kpi"];
-function isLeadRole(role) { return /şef|sorumlu/i.test(role || ""); }
+export function isLeadRole(role) { return /şef|sorumlu|müdür/i.test(role || ""); }
 function defaultWebScreens(t) {
   const base = DEPARTMENT_DEFAULT_SCREENS[t.department] || ["dashboard", "operasyonlar", "katplani", "dokumanlar"];
   if (t.department === "Yönetim") return base;
   return isLeadRole(t.role) ? [...new Set([...base, ...LEAD_EXTRA_SCREENS])] : base;
+}
+
+// Kullanıcı teyidiyle: "olay tutanağını güvenlik müdürüne atsın", "günlük
+// departman müdürüne mail atsın" — bu depoda "müdür" ayrı bir alan/rol
+// değil, personelin `role` metninde geçen Şef/Sorumlu/Müdür ifadesi
+// (isLeadRole ile AYNI kalıp, LEAD_EXTRA_SCREENS'in zaten kullandığı).
+// Departmanda birden fazla lead varsa e-postası olan İLK kişi alınır —
+// yeni bir "müdür" alanı uydurulmadı.
+export function findDeptManager(team, department) {
+  return (team || []).find((t) => t.department === department && isLeadRole(t.role) && t.email) || null;
 }
 export const ALL_PERMISSION_SCREENS = ALL_SCREENS;
 // Ekran listesinden { view, read, write } üçlüsü içeren bir izin haritası
@@ -930,6 +968,13 @@ export function makeInitialState() {
     coolingKwhPerHour: 122,
     invoiceSettings: { logoUrl: "", bankName: "", iban: "", signerName: "", signerTitle: "", dueDays: 10 },
     companies: [],
+    taskTypes: TASK_TYPES,
+    // Faz 9 — Öneriler modülü (bkz. faz-6-11-prompt.md). Bu depoda hiç
+    // karşılığı yoktu, yeni bir alan. Şekil: { id, title, description,
+    // category, photoUrl, anonymous, authorName, authorDepartment, status,
+    // createdAt, supporters:[isim], comments:[{author,text,at}],
+    // statusReason, statusChangedBy, statusChangedAt, convertedTaskId }.
+    suggestions: [],
     // Ana Sayfa'nın (mobil) bölüm sırası/görünürlüğü, departman bazlı —
     // kullanıcı teyidiyle: "sürükle bırak ile ekranı dizayn edebilir miyim"
     // (Ayarlar > Mobil Tasarım). { [departman]: { order: [sectionKey...],
@@ -944,6 +989,7 @@ export function makeInitialState() {
     inspectionRuns: INSPECTION_RUNS,
     mahalPoints: MAHAL_POINTS,
     mahalRuns: MAHAL_RUNS,
+    mahalTurRuns: [],
     patrols: PATROLS,
     incidents: INCIDENTS,
     risks: RISKS,
@@ -1008,6 +1054,33 @@ export function migrateLegacyState(state) {
   if (next.coolingKwhPerHour == null) next = { ...next, coolingKwhPerHour: 122 };
   if (!next.invoiceSettings) next = { ...next, invoiceSettings: { logoUrl: "", bankName: "", iban: "", signerName: "", signerTitle: "", dueDays: 10 } };
   if (!Array.isArray(next.companies)) next = { ...next, companies: [] };
+  // Faz 2 — mevcut (bu alan eklenmeden önce kaydedilmiş) Firestore
+  // dokümanlarına taksonomiyi geriye dönük ekler; sonraki her açılışta
+  // dokunmaz (ör. ileride Ayarlar'dan düzenlenirse üzerine yazmaz).
+  if (!Array.isArray(next.taskTypes)) next = { ...next, taskTypes: TASK_TYPES };
+  // Faz 9 — mevcut Firestore dokümanlarına geriye dönük ekler.
+  if (!Array.isArray(next.suggestions)) next = { ...next, suggestions: [] };
+  // Faz 12 — mahal kontrol "tur" (bir oturumda birden çok mahal gezme)
+  // kayıtları. mahalRuns'a (tekil nokta+periyot doldurma) hiç dokunmaz, ayrı
+  // bir üst-seviye alan (bkz. src/lib/mahalTur.js).
+  if (!Array.isArray(next.mahalTurRuns)) next = { ...next, mahalTurRuns: [] };
+  // Faz 15 — kişi bazlı profil alanları (fotoğraf, bildirim tercihleri,
+  // varsayılan blok, dil, vardiya durumu, telefon görünürlüğü). Hiçbiri bu
+  // depoda yoktu; eksik olan KİŞİYE göre tamamlanır, var olanlara dokunulmaz.
+  if ((next.team || []).some((t) => t.photoUrl === undefined || t.notificationPrefs === undefined)) {
+    next = {
+      ...next,
+      team: next.team.map((t) => ({
+        photoUrl: null,
+        notificationPrefs: { atama: true, yorum: true, mesaj: true, duyuru: true },
+        defaultBlock: "",
+        language: "tr",
+        shiftStatus: "Vardiya dışı",
+        phoneVisible: true,
+        ...t,
+      })),
+    };
+  }
   if (!next.mobileLayout || typeof next.mobileLayout !== "object") next = { ...next, mobileLayout: {} };
   // Güvenlik Devriyesi'nin vardiya (gündüz/gece) saatleri — kullanıcı
   // teyidiyle: "Güvenlik Devriyesi Hergün Belirli Saatlerde tekrar edecek...

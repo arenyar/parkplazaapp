@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
-import { T } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Button } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
@@ -23,8 +23,16 @@ const TABS = [
 // arıza kayıtları "Arıza Kayıtları" sekmesinde listelenir (aynı görev
 // verisinin category alanına göre filtrelenmiş hali — ayrı bir veri kopyası
 // tutulmuyor). "Görevler" sekmesi Teknik'e ait genel işler + yeni görev ekleme.
-export function Teknik({ state, updateState, currentUser, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
-  const [tab, setTab] = useState("takvim");
+// Faz 12 — mobilde varsayılan sekme "takvim" (Bakım Takvimi, masaüstü admin
+// planlama tablosu) OLAMAZ: üst sekme şeridi mobilde tamamen gizli (yukarıdaki
+// not), yani deepLink'siz açılışta kullanıcı o tabloda MAHSUR kalırdı — hiçbir
+// yerden Mahal Kontrol'e geçemezdi. Saha personelinin "Teknik bakım"a
+// tıklayınca gerçekten istediği ekran zaten Mahal Kontrol.
+const MOBILE_DEFAULT_TAB = "mahal";
+
+export function Teknik({ state, updateState, currentUser, role, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+  const T = useTheme();
+  const [tab, setTab] = useState(mobileMode ? MOBILE_DEFAULT_TAB : "takvim");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
 
@@ -84,7 +92,23 @@ export function Teknik({ state, updateState, currentUser, deepLink, onConsumeDee
         </div>
       )}
 
-      {tab === "takvim" && <Bakim state={state} updateState={updateState} currentUser={currentUser} canWrite={canWrite} />}
+      {/* Mobilde admin/tanım ağırlıklı sekmeler (Bakım Takvimi/Planlı
+          Bakımlar/Arıza Kayıtları/Sayaç Okuma) şeritte YOK — bilerek, "mobil =
+          saha" ilkesiyle (bkz. mobil-ops-ui SKILL.md). Sadece sahanın gerçekten
+          kullandığı iki ekran arasında geçiş: Mahal Kontrol ve Görevler. */}
+      {mobileMode && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "gorevler", label: "Görevler" }].map((tb) => (
+            <button key={tb.key} onClick={() => setTab(tb.key)}
+              style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
+                background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>
+              {tb.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "takvim" && <Bakim state={state} updateState={updateState} currentUser={currentUser} role={role} canWrite={canWrite} />}
 
       {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />}
 
@@ -113,7 +137,7 @@ export function Teknik({ state, updateState, currentUser, deepLink, onConsumeDee
             <PageHeader title="Görevler" subtitle={`${genel.length} kayıt — Teknik departmanının genel işleri`}
               right={canWrite && <Button icon={Plus} onClick={startNew}>Yeni Görev</Button>} />
             {formOpen && canWrite && (
-              <TaskForm form={form} setForm={setForm} lockDepartment="Teknik" onSave={save} onCancel={() => setFormOpen(false)} />
+              <TaskForm form={form} setForm={setForm} lockDepartment="Teknik" types={state.taskTypes} team={state.team} onSave={save} onCancel={() => setFormOpen(false)} />
             )}
             <TaskList tasks={genel} onEdit={startEdit} onDelete={remove} showDept={false} emptyText="Kayıt yok." canWrite={canWrite} />
           </div>

@@ -1,11 +1,13 @@
 import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from "lucide-react";
-import { T } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 
 export function Card({ children, style, className }) {
-  return <div className={className} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 14, padding: "18px 20px", ...style }}>{children}</div>;
+  const T = useTheme();
+  return <div className={className} style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: T.radius ?? 14, padding: "18px 20px", ...style }}>{children}</div>;
 }
 
 export function CardTitle({ num, right, children }) {
+  const T = useTheme();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
       {num && <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: T.accent }}>{num}</span>}
@@ -24,6 +26,7 @@ export function Pill({ children, color, bg }) {
 }
 
 export function PageHeader({ title, subtitle, right }) {
+  const T = useTheme();
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
       <div>
@@ -36,9 +39,10 @@ export function PageHeader({ title, subtitle, right }) {
 }
 
 export function Button({ children, onClick, variant = "primary", icon: Icon, style, type = "button", title }) {
-  const base = { display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 8, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
+  const T = useTheme();
+  const base = { display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: T.radiusSm ?? 8, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
   const variants = {
-    primary: { background: T.accent, color: "#0B1420" },
+    primary: { background: T.accent, color: T.onAccent ?? "#0B1420" },
     ghost: { background: T.surface2, color: T.ink, border: `1px solid ${T.line}` },
     quiet: { background: "none", color: T.dim, border: `1px solid ${T.line}` },
   };
@@ -50,20 +54,25 @@ export function Button({ children, onClick, variant = "primary", icon: Icon, sty
 }
 
 export function Input(props) {
-  return <input {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, ...props.style }} />;
+  const T = useTheme();
+  return <input {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: T.radiusSm ?? 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, ...props.style }} />;
 }
 export function Select({ children, ...props }) {
-  return <select {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, ...props.style }}>{children}</select>;
+  const T = useTheme();
+  return <select {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: T.radiusSm ?? 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, ...props.style }}>{children}</select>;
 }
 export function TextArea(props) {
-  return <textarea {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, resize: "vertical", ...props.style }} />;
+  const T = useTheme();
+  return <textarea {...props} style={{ background: T.surface2, border: `1px solid ${T.line}`, borderRadius: T.radiusSm ?? 8, padding: "8px 10px", fontSize: 12.5, color: T.ink, resize: "vertical", ...props.style }} />;
 }
 
-export function Field({ label, required, children }) {
+export function Field({ label, required, right, children }) {
+  const T = useTheme();
   return (
     <div style={{ marginBottom: 10 }}>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 5 }}>
-        {label}{required && <span style={{ color: "#E2685A" }}> *</span>}
+      <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 5 }}>
+        <span>{label}{required && <span style={{ color: "#E2685A" }}> *</span>}</span>
+        {right}
       </label>
       {children}
     </div>
@@ -71,12 +80,14 @@ export function Field({ label, required, children }) {
 }
 
 export function EmptyState({ children }) {
+  const T = useTheme();
   return <p style={{ color: T.dim, fontSize: 13, padding: "20px 0" }}>{children}</p>;
 }
 
 // Uzun listelerin (Görevler, Varlıklar, Riskler, Dokümanlar) taşmasını önlemek
 // için ortak sayfalama kontrolü — bkz. lib/usePagination.js.
 export function Pagination({ page, setPage, pageSize, setPageSize, total }) {
+  const T = useTheme();
   if (total === 0) return null;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = (page - 1) * pageSize + 1;
@@ -106,9 +117,10 @@ export function Pagination({ page, setPage, pageSize, setPageSize, total }) {
 }
 
 export function AvatarInitials({ name, size = 30, bg }) {
+  const T = useTheme();
   const initials = name ? name.split(" ").map((p) => p[0]).slice(0, 2).join("") : "?";
   return (
-    <div style={{ width: size, height: size, borderRadius: "50%", background: bg || T.accent, color: "#0B1420", fontSize: size * 0.4, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+    <div style={{ width: size, height: size, borderRadius: "50%", background: bg || T.accent, color: T.onAccent ?? "#0B1420", fontSize: size * 0.4, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
       {initials}
     </div>
   );

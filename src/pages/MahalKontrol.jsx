@@ -1,16 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
 import { Plus, Pencil, Trash2, QrCode, Camera, X, ClipboardCheck, AlertTriangle, Printer } from "lucide-react";
-import { T } from "../theme.js";
+import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button, Select, Input, Field, TextArea } from "../components/ui.jsx";
+import { PrintHeader, FindingsPage } from "../components/PrintDocument.jsx";
+import { buildFindings } from "../lib/findings.js";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm } from "../components/TaskForm.jsx";
+import { SignaturePad } from "../components/SignaturePad.jsx";
 import { periodKey } from "../lib/periods.js";
 import { validateReading, latestReading } from "../lib/meterValidation.js";
 import { MAHAL_PERIODS, TALEP_TYPES } from "../mockData.js";
 import { locationLabel, collectFireEquipmentLocations, floorPhrase, firmsAtFloorSide } from "../piramitData.js";
 import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
-import { uploadPhoto } from "../lib/storage.js";
+import { uploadPhoto, uploadDataUrl } from "../lib/storage.js";
+import { turKey, buildTurPlan, buildTurPlanForPoint, findActiveTur, startTurPatch, markVisitedPatch, nextExpectedIndex, markSkippedPatch, closeTurPatch, turSummary, staleOpenTurs, PATROL_ESTIMATED_MINUTES, PATROL_TOLERANCE_MINUTES } from "../lib/mahalTur.js";
 
 function emptyPoint(department) {
   return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }], active: true };
@@ -184,7 +188,7 @@ export function resolveMeters(state, point, location) {
 // kontrollerini karıştırma") — burada açılan iş emri sadece başarısız
 // kontrolden doğan "Mahal Kontrol" tipi arıza kaydıdır, Talep/Şikayet
 // modülüyle ilgisi yok.
-export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, photoUrl, meterReadings, compensation, expiryDates, shift }) {
+export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, photoUrl, meterReadings, compensation, expiryDates, shift, signature }) {
   // Kayıt her zaman var olduğu varsayılmaz — bekleyen "Bekliyor" plasehoder'ı
   // sadece MahalKontrol.jsx'in kendi effect'i o departman sayfası açıldığında
   // üretir. Kontroller.jsx (çapraz departman genel görünüm) o sayfa hiç
@@ -260,7 +264,7 @@ export function buildMahalFillPatch(state, point, location, { inspector, answers
   // submit) buraya URL olarak geliyor; `photo` boolean'ı geriye dönük
   // uyumluluk için (eski kayıtları filtreleyen kod bozulmasın) korunuyor,
   // ama artık `photoUrl` üzerinden gerçek görsele erişilebiliyor.
-  const runPatch = { status: "Tamamlandı", completedBy: inspector, completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, photoUrl: photoUrl || null, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
+  const runPatch = { status: "Tamamlandı", completedBy: inspector, completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, photoUrl: photoUrl || null, signatureUrl: signature || null, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
   const mahalRuns = existing
     ? state.mahalRuns.map((r) => (r.id === existing.id ? { ...r, ...runPatch } : r))
     : [...state.mahalRuns, { id: `mr_${point.id}_${location?.key || "x"}_${key}${shift ? `_${shift.id}` : ""}`, pointId: point.id, department: point.department, periodKey: key, locationKey: location?.key, createdAt: new Date().toISOString(), ...runPatch }];
@@ -419,10 +423,21 @@ function powerFactor(activeKw, reactiveKvar) {
   return { apparentKva, cosPhi: apparentKva > 0 ? activeKw / apparentKva : 0 };
 }
 
-export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, onSubmit, onClose }) {
+export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, department, inTour, onSubmit, onClose, onReportIncident }) {
   const [inspector, setInspector] = useState(currentUser || "");
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState("");
+  // Kullanıcı teyidiyle: "teknik mahal kontroller için tamamlandıktan sonra
+  // personel imza ekranı olsun" — sadece Teknik'te zorunlu (Güvenlik'in
+  // Olay Tutanağı'nda zaten kendi 4 kutulu imza akışı var, tekrarlanmadı).
+  // Kullanıcı teyidiyle (devamında): "her mahal için değil toplu olarak
+  // açılan mahal kontrollerde görev tamamlandıktan sonra imza alacak" — bir
+  // Tur (bkz. TurPanel/activeTur) içinde her mahal için ayrı ayrı imza
+  // İSTENMEZ, tur bitince TEK imza alınır (bkz. TurSummaryModal). Bu yüzden
+  // burada `inTour` iken zorunluluk kapanıyor; tur DIŞINDA tek mahal
+  // kontrolünde eskisi gibi her tamamlamada imza gerekir.
+  const requireSignature = department === "Teknik" && !inTour;
+  const [signature, setSignature] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -438,6 +453,12 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
   // genel questions'ı kullanılır.
   const questions = location?.questions || point.questions;
   const desc = location?.assetDesc || point.assetDesc;
+  // Faz 12 — kapanan (Tamamlandı) bir kontrol artık düzenlenemez, düzeltme
+  // yeni dönemin kontrolüyle yapılır (kullanıcı teyidiyle). Daha önce bu
+  // formun "Görüntüle" yolu aslında BOŞ bir form açıyordu (answers hiç
+  // run'dan doldurulmuyordu) — bu artık gerçek kayıtlı cevapları salt okunur
+  // gösteriyor, hem kilit hem de o eski görüntüleme hatası düzeltilmiş oldu.
+  const locked = run?.status === "Tamamlandı";
   const thresholdPct = state?.meterWarningThresholdPct ?? 10;
   // Her sayaç için: bir önceki okuma + yeni değerin doğrulaması (azalma sert
   // engel, %eşik aşımı yumuşak uyarı) — kullanıcı teyidiyle: "sayaç okuma
@@ -452,9 +473,11 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
     return { ...m, previous, val, ...check };
   });
   const meterReadingsBlocked = meterChecks.some((m) => m.blocked);
+  const hasFailWithoutNote = questions.some((q, i) => q.type !== "sayi" && answers[i] === q.failOn) && !note.trim();
   const allAnswered = questions.every((q, i) => (q.type === "sayi" ? answers[i] !== undefined && answers[i] !== "" : answers[i]))
-    && meterChecks.every((m) => m.val != null) && !meterReadingsBlocked
-    && (!point.compensation || (activeKw !== "" && reactiveKvar !== ""));
+    && meterChecks.every((m) => m.val != null) && !meterReadingsBlocked && !hasFailWithoutNote
+    && (!point.compensation || (activeKw !== "" && reactiveKvar !== ""))
+    && (!requireSignature || !!signature);
   const compPreview = activeKw !== "" && reactiveKvar !== "" ? powerFactor(Number(activeKw), Number(reactiveKvar)) : null;
 
   // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
@@ -469,12 +492,70 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
     setPhotoPreviewUrl(URL.createObjectURL(file));
   }
 
+  if (locked) {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px 22px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <span style={{ fontSize: 11.5, color: "#8a8879", fontWeight: 600 }}>{run.completedBy} · {new Date(run.completedAt).toLocaleString("tr-TR")}</span>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
+          </div>
+          <h2 style={{ margin: "6px 0 2px", fontSize: 19, fontWeight: 700, color: "#132A20" }}>{point.name}</h2>
+          {location && <div style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: "#2F6FAE", background: "rgba(47,111,174,0.10)", borderRadius: 999, padding: "2px 10px", marginBottom: 6 }}>{location.label}</div>}
+          <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: "#6E7671", background: "#F1EFE7", borderRadius: 999, padding: "3px 10px", marginBottom: 10, marginLeft: location ? 6 : 0 }}>Kilitli — bu dönem için kontrol tamamlandı, düzeltme yeni dönemle yapılır</div>
+          {run.verifiedBy && (
+            <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: run.verifiedBy === "qr" ? "#2E7D4F" : "#B4551E", background: run.verifiedBy === "qr" ? "rgba(46,125,79,0.10)" : "rgba(224,179,84,0.14)", borderRadius: 999, padding: "3px 10px", marginBottom: 10, marginLeft: 6 }}>
+              {run.verifiedBy === "qr" ? "QR ile doğrulandı" : "Elle doğrulandı"}
+            </div>
+          )}
+
+          {questions.map((q, i) => {
+            const a = run.answers?.[i];
+            const isFail = (run.failedQuestions || []).length > 0 && q.type !== "sayi" && a === q.failOn;
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: "1px solid #EEEBE0" }}>
+                <span style={{ fontSize: 13, color: "#132A20", flex: 1 }}>{q.text}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: isFail ? "#DC5A34" : "#2E7D4F", flexShrink: 0 }}>{a ?? "—"}{q.type === "sayi" && q.unit ? ` ${q.unit}` : ""}</span>
+              </div>
+            );
+          })}
+
+          {run.note && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 }}>Not</div>
+              <p style={{ margin: 0, fontSize: 13, color: "#132A20" }}>{run.note}</p>
+            </div>
+          )}
+          {run.photoUrl && (
+            <img src={run.photoUrl} alt="Kontrol fotoğrafı" style={{ marginTop: 12, width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 10 }} />
+          )}
+          {run.signatureUrl && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 }}>Personel İmzası</div>
+              <img src={run.signatureUrl} alt="İmza" style={{ width: "100%", height: 80, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8, background: "#fff" }} />
+            </div>
+          )}
+
+          {onReportIncident && (
+            <button onClick={onReportIncident} style={{ width: "100%", marginTop: 10, border: "1px solid #E3DFD1", borderRadius: 999, padding: "10px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: "#fff", color: "#B4551E" }}>⚠ Olay Bildir</button>
+          )}
+          <button onClick={onClose} style={{ width: "100%", marginTop: 8, border: "none", borderRadius: 999, padding: "11px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", background: "#F1EFE7", color: "#132A20" }}>Kapat</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px 22px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <span style={{ fontSize: 11.5, color: "#8a8879", fontWeight: 600 }}>{dateLabel}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {onReportIncident && (
+              <button onClick={onReportIncident} style={{ background: "none", border: "none", cursor: "pointer", color: "#B4551E", fontSize: 11.5, fontWeight: 700 }}>⚠ Olay Bildir</button>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
+          </div>
         </div>
         <h2 style={{ margin: "6px 0 2px", fontSize: 19, fontWeight: 700, color: "#132A20" }}>{point.name}</h2>
         {location && <div style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: "#2F6FAE", background: "rgba(47,111,174,0.10)", borderRadius: 999, padding: "2px 10px", marginBottom: 6, marginRight: 6 }}>{location.label}</div>}
@@ -556,11 +637,11 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
                   <span style={{ fontSize: 12, color: "#8a8879" }}>{q.unit}</span>
                 </div>
               ) : (
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
                   {["Evet", "Hayır"].map((opt) => (
                     <button key={opt} onClick={() => setAnswers((a) => ({ ...a, [i]: opt }))}
                       style={{
-                        border: `1px solid ${answers[i] === opt ? "#132A20" : "#E3DFD1"}`, borderRadius: 999, padding: "6px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                        border: `1px solid ${answers[i] === opt ? "#132A20" : "#E3DFD1"}`, borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
                         background: answers[i] === opt ? "#132A20" : "#fff", color: answers[i] === opt ? "#fff" : "#132A20",
                       }}>
                       {opt}
@@ -570,6 +651,11 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
               )}
             </div>
             {q.type === "sayi" && <div style={{ fontSize: 11, color: "#8a8879", marginTop: 3 }}>Beklenen aralık: {q.min}–{q.max} {q.unit}</div>}
+            {/* Kullanıcı teyidiyle (Faz 12): "Uygun değil" (failOn ile eşleşen
+                cevap) seçilirse not zorunlu. */}
+            {q.type !== "sayi" && answers[i] === q.failOn && !note.trim() && (
+              <div style={{ fontSize: 11, color: "#DC5A34", marginTop: 4, fontWeight: 600 }}>Bu madde için not zorunlu — aşağıya kısaca açıklayın.</div>
+            )}
           </div>
         ))}
 
@@ -586,27 +672,38 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
             <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: "none" }} />
           </label>
           {photoPreviewUrl && <img src={photoPreviewUrl} alt="Önizleme" style={{ marginTop: 8, width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 10 }} />}
+          {!photoFile && questions.some((q, i) => q.type !== "sayi" && answers[i] === q.failOn) && (
+            <div style={{ fontSize: 11, color: "#B4551E", marginTop: 6 }}>Uygunsuz bir madde var — mümkünse bir fotoğraf ekleyin.</div>
+          )}
         </div>
+
+        {requireSignature && (
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Personel İmzası *</label>
+            <SignaturePad value={signature} onChange={setSignature} height={110} />
+            {!signature && <div style={{ fontSize: 11, color: "#B4551E", marginTop: 4 }}>Kontrolü tamamlamak için imza gerekli.</div>}
+          </div>
+        )}
 
         <button disabled={!allAnswered || !inspector || uploading} onClick={async () => {
           const meterReadingsPayload = {};
           meterChecks.forEach((m) => { if (m.val != null) meterReadingsPayload[m.meterId] = m.val; });
           let photoUrl = null;
-          if (photoFile) {
-            setUploading(true);
-            try {
-              photoUrl = await uploadPhoto(photoFile, "mahal-fotograflari");
-            } catch (err) {
-              console.error("Fotoğraf yüklenemedi:", err);
-              alert("Fotoğraf yüklenemedi (kontrol yine de fotoğrafsız kaydedilecek): " + err.message);
-            } finally {
-              setUploading(false);
-            }
+          let signatureUrl = null;
+          setUploading(true);
+          try {
+            if (photoFile) photoUrl = await uploadPhoto(photoFile, "mahal-fotograflari");
+            if (signature) signatureUrl = await uploadDataUrl(signature, "imzalar");
+          } catch (err) {
+            console.error("Dosya yüklenemedi:", err);
+            alert("Fotoğraf/imza yüklenemedi (kontrol yine de kaydedilecek): " + err.message);
+          } finally {
+            setUploading(false);
           }
-          onSubmit({ inspector, answers, note, photo: !!photoFile, photoUrl, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift });
+          onSubmit({ inspector, answers, note, photo: !!photoFile, photoUrl, signature: signatureUrl, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift });
         }}
           style={{ width: "100%", border: "none", borderRadius: 999, padding: "13px 0", fontSize: 14, fontWeight: 700, cursor: allAnswered && inspector && !uploading ? "pointer" : "default", background: "#DC5A34", color: "#fff", opacity: allAnswered && inspector && !uploading ? 1 : 0.5 }}>
-          {uploading ? "Fotoğraf yükleniyor…" : "Kontrolü Tamamla"}
+          {uploading ? "Kaydediliyor…" : "Kontrolü Tamamla"}
         </button>
         </>)}
       </div>
@@ -630,6 +727,7 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
 // gösterilir; groupByFloor=true (varsayılan, ör. yangın tüpü/exit armatürü)
 // kat bazında gruplanır, kat başına TEK QR.
 export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor, onQr, onEdit, onDelete, onToggleActive, onOpenNonConformity, initialQuery, canWrite = true }) {
+  const T = useTheme();
   const [q, setQ] = useState(initialQuery || "");
   const cardRef = useRef(null);
   const grouped = point.groupByFloor !== false;
@@ -771,6 +869,7 @@ export function PerFloorCard({ point, locations, runs, tasks, onFill, onQrFloor,
 // konumlu olanlar) kendi PerFloorCard'ını korur — o zaten arama+liste
 // içeriyor, tek satıra sığmaz.
 function MobileMahalRow({ point: p, state, onFill }) {
+  const T = useTheme();
   const run = runFor(p, state.mahalRuns);
   const done = run?.status === "Tamamlandı";
   const nc = hasNonConformity(p, state);
@@ -797,6 +896,7 @@ function MobileMahalRow({ point: p, state, onFill }) {
 }
 
 function MobileMahalList({ points, state, onFill, onQrFloor, onQr, onOpenNonConformity }) {
+  const T = useTheme();
   const groups = MAHAL_PERIODS
     .map((period) => ({ period, items: points.filter((p) => p.period === period) }))
     .filter((g) => g.items.length > 0);
@@ -829,12 +929,234 @@ function MobileMahalList({ points, state, onFill, onQrFloor, onQr, onOpenNonConf
   );
 }
 
+// Faz 12 — "Tur": bir oturumda birden çok mahalın gezilmesi. Aşağıdaki
+// MobileMahalList/PerFloorCard listesi DEĞİŞMEDEN kalır (tur yokken de aynı
+// şekilde tek tek doldurulabilir) — bu panel sadece üstte bir ilerleme/kapatma
+// katmanı ekler. Aktif tur Firestore'a yazıldığı için (mahalTurRuns) yarım
+// kalan bir tur başka bir oturumda/cihazda bile kaldığı yerden devam eder.
+function TurPanel({ state, department, currentUser, activeTur, onStart, onFinish }) {
+  const T = useTheme();
+  const [starting, setStarting] = useState(false);
+  const now = useNow(15000);
+  const periods = ["Günlük", "Haftalık", "Aylık"].filter((p) => buildTurPlan(state, department, p).length > 0);
+  const stale = staleOpenTurs(state, department).filter((t) => t.id !== activeTur?.id);
+  // Faz 13 — "guv_tur" (kat devriyesi) tanımlıysa, o TEK noktanın kendi sırasıyla
+  // (bkz. getLocations) yürüyen ayrı bir sıralı tur seçeneği sunulur; genel
+  // Günlük/Haftalık/Aylık turlardan farkı sıra takibi ve atlama uyarısıdır.
+  const patrolPoint = state.mahalPoints.find((p) => p.id === "guv_tur" && p.department === department && !p.archived && p.active !== false);
+  const patrolPlan = patrolPoint ? buildTurPlanForPoint(state, patrolPoint.id) : [];
+
+  if (activeTur) {
+    const planned = activeTur.plannedPointKeys.length;
+    const visited = activeTur.visitedPointKeys.length;
+    const skipped = (activeTur.skippedPointKeys || []).length;
+    const pct = planned > 0 ? Math.min(100, Math.round((visited / planned) * 100)) : 0;
+    const elapsedMin = Math.round((now.getTime() - new Date(activeTur.startedAt).getTime()) / 60000);
+    const overdue = activeTur.ordered && elapsedMin > PATROL_ESTIMATED_MINUTES + PATROL_TOLERANCE_MINUTES;
+    return (
+      <Card style={{ marginBottom: 16, background: T.accent, border: "none" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: T.onAccent ?? "#fff" }}>{activeTur.scopeLabel}{overdue && <span style={{ marginLeft: 8, color: "#FCEBEA" }}>· Gecikti</span>}</div>
+          <button onClick={onFinish} style={{ border: "none", borderRadius: 999, padding: "6px 14px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.22)", color: T.onAccent ?? "#fff" }}>Turu Bitir</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.8)" }}>
+          {planned > 0 ? `${visited} / ${planned} mahal` : `${visited} mahal gezildi — serbest kontrol`}
+          {skipped > 0 ? ` · ${skipped} atlandı` : ""}
+        </div>
+        {planned > 0 && (
+          <div style={{ marginTop: 6, height: 5, borderRadius: 3, background: "rgba(255,255,255,0.25)", overflow: "hidden" }}>
+            <div style={{ width: `${pct}%`, height: "100%", background: overdue ? "#F2A08F" : (T.onAccent ?? "#fff") }} />
+          </div>
+        )}
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.68)", marginTop: 8 }}>
+          {activeTur.ordered ? "Sırayla nokta okutun/seçin — atlarsanız uyarı gösterilir." : "QR okutmadan da aşağıdaki listeden mahal seçip kontrol açabilirsiniz."}
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>Kontrol turu başlat</div>
+      {!starting ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {patrolPoint && (
+            <Button onClick={() => onStart({ ordered: true, pointId: patrolPoint.id, scopeLabel: `Sıralı Kat Devriyesi (${patrolPlan.length} nokta)` })}>
+              Sıralı Kat Devriyesi ({patrolPlan.length})
+            </Button>
+          )}
+          <Button variant={patrolPoint ? "quiet" : "primary"} onClick={() => setStarting(true)}>Tur başlat</Button>
+          <Button variant="quiet" onClick={() => onStart({ scopeLabel: "Serbest kontrol" })}>Serbest kontrol</Button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {periods.map((p) => {
+            const count = buildTurPlan(state, department, p).length;
+            return (
+              <Button key={p} variant="quiet" onClick={() => onStart({ period: p, scopeLabel: `${p} tur (${count} mahal)` })}>{p} ({count})</Button>
+            );
+          })}
+          <Button variant="ghost" onClick={() => setStarting(false)}>Vazgeç</Button>
+        </div>
+      )}
+      {stale.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11, color: "#E0B354" }}>
+          ⚠ {stale.length} açık tur kapatılmadan kaldı ({stale.map((t) => t.inspector).join(", ")}) — vardiya bitiminde kontrol edin.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Kullanıcı teyidiyle: "her mahal için değil toplu olarak açılan mahal
+// kontrollerde görev tamamlandıktan sonra imza alacak" — tur (toplu kontrol)
+// bittiğinde, bu özet ekranında TEK bir imza alınır (her mahal için ayrı
+// ayrı DEĞİL, bkz. FillModal'daki `inTour` istisnası). Sadece Teknik'te
+// zorunlu — Güvenlik'in kendi devriye/olay akışında ayrı imza mekanizması
+// var, tekrarlanmadı. Tur verisi (mahalTurRuns) "Turu Bitir"e basılınca zaten
+// tamamlandı olarak kaydedilir (bkz. finishTur) — imza, tamamlanmış tur
+// kaydına SONRADAN eklenen bir alan (`signatureUrl`), tamamlanmayı geciktiren
+// bir kapı değil.
+function TurSummaryModal({ tur, state, onConfirm, onClose }) {
+  const { visited, planned, skipped, uygun, arizali, durationMin } = turSummary(state, tur);
+  const requireSignature = tur.department === "Teknik";
+  const [signature, setSignature] = useState(null);
+  const [saving, setSaving] = useState(false);
+  // Kullanıcı teyidiyle: "Devriye Tur Pdf raporunda görsel ve uygunsuzluk
+  // var ise Tespitler adında ikinci sayfaya taşı" — turda GEZİLEN
+  // noktaların Tamamlandı kayıtlarından, aynı buildFindings kaynağı
+  // (Raporlar.jsx'in Teknik Rapor'uyla PAYLAŞILIYOR).
+  const visitedRuns = tur.visitedPointKeys
+    .map((key) => { const [pointId, locationKey] = key.split("::"); return (state.mahalRuns || []).find((r) => r.pointId === pointId && (r.locationKey || "") === locationKey && r.status === "Tamamlandı"); })
+    .filter(Boolean);
+  const findings = buildFindings(state, visitedRuns);
+  const printDate = new Date(tur.closedAt || Date.now()).toLocaleDateString("tr-TR");
+  function print() { setTimeout(() => window.print(), 60); }
+  async function confirm() {
+    if (requireSignature && !signature) return;
+    setSaving(true);
+    try {
+      const signatureUrl = signature ? await uploadDataUrl(signature, "imzalar") : null;
+      onConfirm(signatureUrl);
+    } catch (err) {
+      console.error("İmza yüklenemedi:", err);
+      alert("İmza yüklenemedi, tekrar deneyin: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 210, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 360, maxWidth: "100%", padding: "22px", maxHeight: "90vh", overflowY: "auto" }}>
+        <div className="no-print">
+        <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700, color: "#132A20" }}>Tur tamamlandı</h3>
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "#8a8879" }}>{tur.scopeLabel}</p>
+        {tur.late && (
+          <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: "#DC5A34", background: "rgba(220,90,52,0.10)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 }}>Gecikmiş</div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: skipped > 0 ? 8 : 16 }}>
+          <div style={{ background: "#F1EFE7", borderRadius: 10, padding: "12px" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#132A20" }}>{visited}{planned > 0 ? `/${planned}` : ""}</div>
+            <div style={{ fontSize: 11, color: "#8a8879" }}>Gezilen mahal</div>
+          </div>
+          <div style={{ background: "#F1EFE7", borderRadius: 10, padding: "12px" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#132A20" }}>{durationMin} dk</div>
+            <div style={{ fontSize: 11, color: "#8a8879" }}>Süre</div>
+          </div>
+          <div style={{ background: "rgba(46,125,79,0.10)", borderRadius: 10, padding: "12px" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#2E7D4F" }}>{uygun}</div>
+            <div style={{ fontSize: 11, color: "#8a8879" }}>Uygun</div>
+          </div>
+          <div style={{ background: "rgba(220,90,52,0.10)", borderRadius: 10, padding: "12px" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#DC5A34" }}>{arizali}</div>
+            <div style={{ fontSize: 11, color: "#8a8879" }}>Arıza açılan</div>
+          </div>
+        </div>
+        {skipped > 0 && <p style={{ margin: "0 0 16px", fontSize: 12, color: "#B4551E" }}>{skipped} nokta atlandı (kayda geçti).</p>}
+        {findings.length > 0 && (
+          <p style={{ margin: "0 0 16px", fontSize: 11.5, color: "#8a8879" }}>+ {findings.length} tespit — PDF çıktısında "Tespitler" ek sayfasında.</p>
+        )}
+        {requireSignature && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Personel İmzası *</label>
+            <SignaturePad value={signature} onChange={setSignature} height={100} />
+            {!signature && <div style={{ fontSize: 11, color: "#B4551E", marginTop: 4 }}>Turu onaylamak için imza gerekli.</div>}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <Button icon={Printer} variant="ghost" style={{ flex: 1, justifyContent: "center" }} onClick={print}>Yazdır / PDF</Button>
+        </div>
+        <button disabled={(requireSignature && !signature) || saving} onClick={confirm}
+          style={{ width: "100%", border: "none", borderRadius: 999, padding: "12px 0", fontSize: 13.5, fontWeight: 700, cursor: (requireSignature && !signature) || saving ? "default" : "pointer", background: "#132A20", color: "#fff", opacity: (requireSignature && !signature) || saving ? 0.5 : 1 }}>
+          {saving ? "Kaydediliyor…" : "Onayla ve kapat"}
+        </button>
+        </div>
+
+        {/* Kurumsal PDF çıktısı — ekranda "Yazdır/PDF"e basınca görünen tam
+            sayfa özet + (varsa) Tespitler eki. Diğer belgelerle (Olay
+            Tutanağı, Raporlar) AYNI PrintHeader/FindingsPage kalıbı. */}
+        <div className="invoice-print-area">
+          <div className="fatura-sayfa" style={{ background: "#fff", color: "#1a1a1a", width: "190mm", minHeight: "160mm", margin: "0 auto 10mm", padding: "14mm", fontFamily: "Arial, Helvetica, sans-serif", boxSizing: "border-box" }}>
+            <PrintHeader branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl} docTitle="Devriye Tur Raporu" docSubtitle={`${tur.scopeLabel} — ${printDate}`} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+              {[["Gezilen Mahal", `${visited}${planned > 0 ? `/${planned}` : ""}`], ["Süre", `${durationMin} dk`], ["Uygun", uygun], ["Arıza Açılan", arizali], ["Atlanan", skipped]].map(([label, value]) => (
+                <div key={label} style={{ flex: "1 1 120px", border: "1px solid #ddd", borderRadius: 6, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#777", textTransform: "uppercase", fontWeight: 700 }}>{label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", marginTop: 2 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            {tur.late && <p style={{ fontSize: 11, color: "#DC5A34", fontWeight: 700 }}>⚠ Tur tolerans süresini aşarak gecikmiş olarak tamamlandı.</p>}
+          </div>
+          <FindingsPage branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl} printDate={printDate} items={findings} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DuplicateScanConfirm({ label, onConfirm, onCancel }) {
+  const T = useTheme();
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 210, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 340, maxWidth: "100%", padding: "20px" }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, color: "#132A20" }}>Bu mahal bu turda kontrol edildi</h3>
+        <p style={{ margin: "0 0 16px", fontSize: 12.5, color: "#8a8879" }}>{label} — tekrar açılsın mı?</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onConfirm} style={{ flex: 1, border: "none", borderRadius: 999, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "#132A20", color: "#fff" }}>Evet, aç</button>
+          <button onClick={onCancel} style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "#fff", color: "#132A20" }}>Vazgeç</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Faz 13 — sıralı bir turda sıradakinden ileride bir nokta seçilirse
+// (kullanıcı teyidiyle: "atlama engellenmez, kayda geçer"). Onaylanırsa
+// aradaki noktalar "atlandı" işaretlenir, engellenmez.
+function SkipConfirm({ fromLabel, skipped, label, onConfirm, onCancel }) {
+  const T = useTheme();
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 210, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 340, maxWidth: "100%", padding: "20px" }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, color: "#132A20" }}>{fromLabel} nokta okutulmadı</h3>
+        <p style={{ margin: "0 0 16px", fontSize: 12.5, color: "#8a8879" }}>{skipped.length} nokta atlanacak, {label}'a devam edilsin mi? Atlama kayda geçer.</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onConfirm} style={{ flex: 1, border: "none", borderRadius: 999, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "#132A20", color: "#fff" }}>Devam et</button>
+          <button onClick={onCancel} style={{ flex: 1, border: `1px solid ${T.line}`, borderRadius: 999, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "#fff", color: "#132A20" }}>Vazgeç</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Mahal Kontrol — Teknik/Temizlik/Güvenlik'in ortak kullanacağı konum bazlı
 // kontrol sistemi. Her nokta kendi periyoduna göre (Günlük/Haftalık/Aylık/
 // Yıllık) otomatik olarak "Bekliyor" durumunda bir kontrol kaydı üretir —
 // personelin ayrıca "yeni kontrol oluştur" demesine gerek yok, QR okutunca
 // veya buradan tıklayınca doldurulmayı bekleyen kayıt zaten hazır.
 export function MahalKontrol({ state, updateState, currentUser, department, title = "Mahal Kontrol", deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+  const T = useTheme();
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyPoint(department));
   const [fillPoint, setFillPoint] = useState(null);
@@ -845,6 +1167,10 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   const [taskForm, setTaskForm] = useState(null);
   const [roleFilter, setRoleFilter] = useState("");
   const [floorFocus, setFloorFocus] = useState(null);
+  const [turSummaryTarget, setTurSummaryTarget] = useState(null);
+  const [dupConfirm, setDupConfirm] = useState(null);
+  const [skipConfirm, setSkipConfirm] = useState(null);
+  const activeTur = findActiveTur(state, department, currentUser);
   // Mahal Kontrol yapılırken hızlı Talep/Şikayet kaydı — kullanıcı teyidiyle:
   // "Mahal kontrol yapılırken Talep Şikayet Kaydı açılabilsin Arıza kaydı
   // gibi basit olmalı" + sonradan: "teknik, temizlik ve güvenlik mahal
@@ -885,7 +1211,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
     const point = state.mahalPoints.find((p) => p.id === deepLink.pointId && p.department === department);
     if (point) {
       if (point.perFloor) setFloorFocus({ pointId: point.id, floorLabel: deepLink.floorLabel });
-      else setFillPoint({ point, location: null });
+      else requestFill(point, null, null, "qr");
     }
     onConsumeDeepLink();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -960,9 +1286,60 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   function removeShift(i) { setForm((f) => ({ ...f, shifts: f.shifts.filter((_, idx) => idx !== i) })); }
 
   function submitFill(payload) {
-    const { point, location } = fillPoint;
-    updateState(buildMahalFillPatch(state, point, location, payload));
+    const { point, location, shift, source } = fillPoint;
+    let patch = buildMahalFillPatch(state, point, location, payload);
+    // Faz 13 — bu kayıt QR/NFC ile mi elle mi açıldı, denetimde ayrımı
+    // görülsün diye run'a yazılır (kullanıcı teyidiyle: "elle girilen nokta
+    // kayıtta 'elle doğrulandı' olarak işaretlenir").
+    if (patch.mahalRuns) {
+      patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (location?.key || null) && (r.shiftId || null) === (shift?.id || null) ? { ...r, verifiedBy: source || "manual" } : r)) };
+    }
+    // Faz 12 — aktif bir tur varsa, doldurulan mahal aynı updateState
+    // çağrısında "gezildi" olarak işaretlenir (ayrı bir yazma turu
+    // tetiklemez, tek atomik patch).
+    if (activeTur) {
+      const key = turKey(point.id, location?.key || null, shift?.id || null);
+      patch = { ...patch, ...markVisitedPatch(state, activeTur, key) };
+    }
+    updateState(patch);
     setFillPoint(null);
+  }
+
+  // Tur aktifken aynı mahal ikinci kez seçilirse önce onay istenir
+  // (kullanıcı teyidiyle: "Bu mahal bu turda kontrol edildi, tekrar açılsın
+  // mı?"). Sıralı (Faz 13) bir turda sıradakinden İLERİDE bir nokta seçilirse
+  // aradakiler "atlandı" onayı istenir. Tur yokken davranış eskisiyle birebir
+  // aynı — direkt açılır. `source`: "qr" (QR/NFC okutma) | "manual" (listeden
+  // seçim) — run'a "elle doğrulandı" ayrımı için yazılır.
+  function requestFill(point, location, shift, source = "manual") {
+    const open = () => setFillPoint({ point, location, shift, source });
+    if (!activeTur) { open(); return; }
+    const key = turKey(point.id, location?.key || null, shift?.id || null);
+    if (activeTur.visitedPointKeys.includes(key)) {
+      setDupConfirm({ point, location, shift, source, label: location ? `${point.name} — ${location.label}` : point.name });
+      return;
+    }
+    if (activeTur.ordered) {
+      const idx = activeTur.plannedPointKeys.indexOf(key);
+      const expected = nextExpectedIndex(activeTur);
+      if (idx !== -1 && expected !== -1 && idx > expected) {
+        const skipped = activeTur.plannedPointKeys.slice(expected, idx);
+        setSkipConfirm({ point, location, shift, source, skipped, fromLabel: `${expected + 1}.`, label: location ? `${point.name} — ${location.label}` : point.name });
+        return;
+      }
+    }
+    open();
+  }
+
+  function startTur({ period, scopeLabel, ordered, pointId }) {
+    const { mahalTurRuns } = startTurPatch(state, { department, inspector: currentUser, period, scopeLabel, ordered, pointId });
+    updateState({ mahalTurRuns });
+  }
+  function finishTur() {
+    if (!activeTur) return;
+    const { mahalTurRuns, late } = closeTurPatch(state, activeTur);
+    updateState({ mahalTurRuns });
+    setTurSummaryTarget({ ...activeTur, status: "Tamamlandı", closedAt: new Date().toISOString(), late });
   }
 
   // Bu mahallerden (kontrol başarısız olunca) açılan iş emirleri — Görevler/Arıza
@@ -1166,9 +1543,13 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
         </Card>
       )}
 
+      {mobileMode && (
+        <TurPanel state={state} department={department} currentUser={currentUser} activeTur={activeTur} onStart={startTur} onFinish={finishTur} />
+      )}
+
       {mobileMode ? (
         <MobileMahalList points={points} state={state}
-          onFill={(p, loc, shift) => setFillPoint({ point: p, location: loc, shift })}
+          onFill={(p, loc, shift) => requestFill(p, loc, shift)}
           onQrFloor={(p, g) => setQrPoint({ point: p, floorGroup: g })}
           onQr={(p, loc) => setQrPoint({ point: p, location: loc })}
           onOpenNonConformity={(p, loc) => setNcTarget({ point: p, location: loc })} />
@@ -1178,7 +1559,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
           {points.map((p) => (
             p.perFloor ? (
               <PerFloorCard key={p.id} point={p} locations={getLocations(p, state)} runs={state.mahalRuns} tasks={state.tasks}
-                onFill={(loc, shift) => setFillPoint({ point: p, location: loc, shift })} onQrFloor={(g) => setQrPoint({ point: p, floorGroup: g })} onQr={(loc) => setQrPoint({ point: p, location: loc })}
+                onFill={(loc, shift) => requestFill(p, loc, shift)} onQrFloor={(g) => setQrPoint({ point: p, floorGroup: g })} onQr={(loc) => setQrPoint({ point: p, location: loc })}
                 onEdit={() => startEdit(p)} onDelete={() => removePoint(p.id)} onToggleActive={() => toggleActive(p.id)} onOpenNonConformity={(loc) => setNcTarget({ point: p, location: loc })} canWrite={canWrite}
                 initialQuery={floorFocus?.pointId === p.id ? floorPhrase(floorFocus.floorLabel) : undefined} />
             ) : (() => {
@@ -1222,7 +1603,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
                       <span style={{ fontSize: 10.5, fontWeight: 600, color: done ? "#3FB37F" : "#E0B354" }}>{done ? `✓ ${run.completedBy}` : "Bekliyor"}</span>
                     </span>
                   </div>
-                  <Button variant="ghost" style={{ width: "100%", marginTop: 10, justifyContent: "center" }} onClick={() => setFillPoint({ point: p, location: null })}>{done ? "Tekrar Görüntüle" : "Kontrol Et"}</Button>
+                  <Button variant="ghost" style={{ width: "100%", marginTop: 10, justifyContent: "center" }} onClick={() => requestFill(p, null, null)}>{done ? "Tekrar Görüntüle" : "Kontrol Et"}</Button>
                 </Card>
               );
             })()
@@ -1239,7 +1620,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
         <div style={{ marginTop: 28 }}>
           <PageHeader title="Mahal Kontrol İş Emirleri" subtitle={`${mahalTasks.length} kayıt — bu mahallerdeki başarısız kontrollerden otomatik açılır`} />
           {taskFormOpen && canWrite && (
-            <TaskForm form={taskForm} setForm={setTaskForm} lockDepartment={department} onSave={saveTask} onCancel={() => setTaskFormOpen(false)} />
+            <TaskForm form={taskForm} setForm={setTaskForm} lockDepartment={department} types={state.taskTypes} team={state.team} onSave={saveTask} onCancel={() => setTaskFormOpen(false)} />
           )}
           <TaskList tasks={mahalTasks} onEdit={startEditTask} onDelete={removeTask} showDept={false} emptyText="Henüz bu mahallerden açılmış bir iş emri yok." canWrite={canWrite} />
         </div>
@@ -1248,10 +1629,38 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
       {fillPoint && (
         <FillModal point={fillPoint.point} location={fillPoint.location} shift={fillPoint.shift} meters={resolveMeters(state, fillPoint.point, fillPoint.location)} state={state}
           run={runFor(fillPoint.point, state.mahalRuns, fillPoint.location?.key, fillPoint.shift?.id)} team={state.team.filter((t) => t.department === fillPoint.point.department)} currentUser={currentUser} assets={state.assets}
-          onSubmit={submitFill} onClose={() => setFillPoint(null)} />
+          department={fillPoint.point.department} inTour={!!activeTur}
+          onSubmit={submitFill} onClose={() => setFillPoint(null)}
+          onReportIncident={() => startQuickRequest({ point: fillPoint.point, location: fillPoint.location })} />
       )}
       {qrPoint && <QrModal point={qrPoint.point} location={qrPoint.location} floorGroup={qrPoint.floorGroup} onClose={() => setQrPoint(null)} />}
       {ncTarget && <NonConformityPanel point={ncTarget.point} location={ncTarget.location} state={state} onClose={() => setNcTarget(null)} />}
+      {dupConfirm && (
+        <DuplicateScanConfirm label={dupConfirm.label}
+          onConfirm={() => { setFillPoint({ point: dupConfirm.point, location: dupConfirm.location, shift: dupConfirm.shift, source: dupConfirm.source }); setDupConfirm(null); }}
+          onCancel={() => setDupConfirm(null)} />
+      )}
+      {skipConfirm && (
+        <SkipConfirm fromLabel={skipConfirm.fromLabel} skipped={skipConfirm.skipped} label={skipConfirm.label}
+          onConfirm={() => {
+            updateState(markSkippedPatch(state, activeTur, skipConfirm.skipped));
+            setFillPoint({ point: skipConfirm.point, location: skipConfirm.location, shift: skipConfirm.shift, source: skipConfirm.source });
+            setSkipConfirm(null);
+          }}
+          onCancel={() => setSkipConfirm(null)} />
+      )}
+      {turSummaryTarget && (
+        <TurSummaryModal
+          tur={turSummaryTarget} state={state}
+          onConfirm={(signatureUrl) => {
+            if (signatureUrl) {
+              updateState({ mahalTurRuns: state.mahalTurRuns.map((t) => (t.id === turSummaryTarget.id ? { ...t, signatureUrl } : t)) });
+            }
+            setTurSummaryTarget(null);
+          }}
+          onClose={() => setTurSummaryTarget(null)}
+        />
+      )}
     </div>
   );
 }

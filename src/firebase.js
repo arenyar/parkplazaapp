@@ -1,6 +1,6 @@
 import { initializeApp, deleteApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, createUserWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 import { showToast } from "./lib/toast.js";
 
 // Kullanıcı teyidiyle: "yine aynı klasörde firebase bağlantısını yap" —
@@ -44,7 +44,18 @@ export function resetPasswordEmail(email) { return sendPasswordResetEmail(auth, 
 // vermez (bkz. plan: Ayarlar.jsx/Yonetim.jsx artık bunun yerine
 // resetPasswordEmail kullanıyor, sadece bu kendi-şifreni-değiştir akışı
 // updatePassword'ü kullanır).
-export function changeOwnPassword(newPassword) { return updatePassword(auth.currentUser, newPassword); }
+// Faz 15 — kullanıcı teyidiyle: "Şifre değiştirmede reauthenticateWithCredential
+// zorunlu... Mevcut şifre sorulmadan değişiklik yapılmaz." Önceki sürüm
+// doğrudan updatePassword çağırıyordu; Firebase Auth bunu oturum "taze"
+// değilse zaten `auth/requires-recent-login` ile reddediyordu ama akış
+// kullanıcıya MEVCUT şifreyi hiç sormuyordu — şimdi her zaman önce mevcut
+// şifreyle yeniden kimlik doğrulanıyor (yanlışsa updatePassword'e hiç
+// gidilmiyor, `auth/wrong-password` PasswordChangeForm'da yakalanır).
+export async function changeOwnPassword(currentPassword, newPassword) {
+  const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+  await reauthenticateWithCredential(auth.currentUser, cred);
+  return updatePassword(auth.currentUser, newPassword);
+}
 
 // Yönetim > "Kullanıcı Aç" — admin başka biri için hesap açarken KENDİ
 // oturumundan atılmasın diye (createUserWithEmailAndPassword ana `auth`
@@ -147,11 +158,21 @@ function saveErrorMessage(code) {
   if (code === "unavailable" || code === "deadline-exceeded") return "Kaydedilemedi — bağlantınızı kontrol edin. Değişiklik ekranda duruyor ama sunucuya iletilemedi, tekrar deneyin.";
   return "Kaydedilemedi — beklenmeyen bir hata oluştu. Değişiklik ekranda duruyor, sayfayı yenilemeden tekrar deneyin.";
 }
-export async function saveState(patch) {
+// Dönüş değeri (true/false) — Faz 1b çevrimdışı kuyruğu (bkz.
+// src/mobile/offline/draftQueue.js) yazmanın GERÇEKTEN sunucuya ulaşıp
+// ulaşmadığını bilmeden taslağı kuyruktan silemez; App.jsx'teki updateState
+// bunu olduğu gibi yukarı taşır. Mevcut ~15 çağıran bu değeri hiç okumuyor,
+// davranışları değişmedi. `silent` — kuyruk arka planda sessizce yeniden
+// dener; her başarısız deneme için kullanıcıya aynı hata toast'ını tekrar
+// tekrar göstermek (özellikle telefon cebindeyken) gürültü olur, kuyruk
+// kendi UI'ında (Taslaklar ekranı) zaten bekleyen kayıt sayısını gösteriyor.
+export async function saveState(patch, { silent = false } = {}) {
   try {
     await setDoc(STATE_DOC, stripUndefined(patch), { merge: true });
+    return true;
   } catch (e) {
     console.error("Firestore kaydetme hatası:", e);
-    showToast(saveErrorMessage(e.code), "error");
+    if (!silent) showToast(saveErrorMessage(e.code), "error");
+    return false;
   }
 }

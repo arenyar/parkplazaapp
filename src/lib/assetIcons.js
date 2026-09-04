@@ -3,6 +3,7 @@ import {
   Monitor, BatteryCharging, Camera, AlertTriangle, Tv, Volume2, Phone,
   Laptop, Radio, ShieldAlert, Package, Waves, KeyRound,
 } from "lucide-react";
+import { equipmentAccent } from "../theme.js";
 
 // Kategori → ikon + renk eşlemesi. Renkler dekoratif değil, ekipman ailesini
 // tutarlı şekilde ayırt etmek için var (master prompt madde 6 ruhuna uygun —
@@ -13,7 +14,7 @@ const MAP = {
   "Isıtma Sistemi": { icon: Flame, color: "#E08A3E" },
   "Jeneratör": { icon: Zap, color: "#E0B354" },
   "Elektrik Sistemi": { icon: Zap, color: "#5B9BD9" },
-  "Kesintisiz Güç Kaynağı": { icon: BatteryCharging, color: "#B36BD4" },
+  "Kesintisiz Güç Kaynağı": { icon: BatteryCharging, color: equipmentAccent },
   "Asansör": { icon: MoveVertical, color: "#2FA6A6" },
   "Cephe Temizleme Asansörü": { icon: MoveVertical, color: "#5FB3B3" },
   "Yangın Suyu Basınçlandırma Sistemi": { icon: Droplets, color: "#E2685A" },
@@ -24,7 +25,7 @@ const MAP = {
   "Havalandırma ve Klima Santrali": { icon: Wind, color: "#3FB37F" },
   "Klima": { icon: Wind, color: "#3FB37F" },
   "Otomatik Kapı": { icon: DoorOpen, color: "#8C97A8" },
-  "Kapı ve Geçiş Sistemi": { icon: KeyRound, color: "#B36BD4" },
+  "Kapı ve Geçiş Sistemi": { icon: KeyRound, color: equipmentAccent },
   "Temizlik Ekipmanı": { icon: Sparkles, color: "#E0B354" },
   "Bilgisayar Sistemi": { icon: Monitor, color: "#8C97A8" },
   "Kapalı Devre Kamera ve Güvenlik Sistemi": { icon: Camera, color: "#E08A3E" },

@@ -1,4 +1,5 @@
 import { T } from "../theme.js";
+import { mobileUiTheme as M } from "../mobile/tokens.js";
 
 export function GlobalStyle() {
   return (
@@ -25,19 +26,21 @@ export function GlobalStyle() {
          MobileApp.jsx'in kabuğu (.mobile-shell), telefon genişliğinde bir
          kart gibi HER viewport genişliğinde (masaüstünde de) aynı görünsün
          diye — @media (max-width:900px)'e bağlı olmadan, her zaman etkin. */
-      .mobile-shell { min-height: 100vh; max-width: 480px; margin: 0 auto; background: ${T.bg}; font-family: 'Segoe UI', Inter, system-ui, sans-serif; position: relative; }
+      .mobile-shell { min-height: 100vh; max-width: 480px; margin: 0 auto; background: ${M.bg}; color: ${M.ink}; font-family: 'Segoe UI', Inter, system-ui, sans-serif; position: relative; }
       .mobile-shell .main-content { padding: 16px; padding-bottom: calc(78px + env(safe-area-inset-bottom)); box-sizing: border-box; }
       .mobile-shell .grid-3, .mobile-shell .grid-2 { grid-template-columns: 1fr !important; }
       .mobile-shell .bottom-nav {
         display: flex; align-items: flex-end; position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 480px; z-index: 45;
-        background: ${T.surface2}; border-top: 1px solid ${T.line}; padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+        background: ${M.surface}; border-top: 1px solid ${M.line}; padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
       }
-      .mobile-shell .bn-btn, .mobile-shell .bn-scan { all: unset; cursor: pointer; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+      .mobile-shell .bn-btn, .mobile-shell .bn-scan { all: unset; cursor: pointer; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; color: ${M.dim}; }
       .mobile-shell .bn-btn span, .mobile-shell .bn-scan span:last-child { font-size: 10px; font-weight: 600; }
       .mobile-shell .bn-scan-circle {
-        width: 50px; height: 50px; border-radius: 50%; background: ${T.accent}; display: flex; align-items: center;
-        justify-content: center; margin-top: -30px; border: 3px solid ${T.surface2}; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        width: 50px; height: 50px; border-radius: 50%; background: ${M.accent}; display: flex; align-items: center;
+        justify-content: center; margin-top: -30px; border: 3px solid ${M.surface}; box-shadow: 0 4px 14px rgba(30,74,61,0.28);
       }
+      .mobile-shell input:focus, .mobile-shell select:focus, .mobile-shell textarea:focus { outline: 2px solid ${M.accent}; }
+      .mobile-shell ::selection { background: ${M.accent}; color: #fff; }
       @media print {
         body * { visibility: hidden; }
         .invoice-print-area, .invoice-print-area * { visibility: visible; }
