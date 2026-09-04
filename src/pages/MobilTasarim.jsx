@@ -307,7 +307,7 @@ export function MobilTasarim({ state, updateState }) {
     // girdiği alan olmalı, formlar üzerinde değişiklik/silme olmamalı") —
     // App.jsx'teki gibi viewport genişliğine göre otomatik algılamaya
     // gerek yok, zaten telefon çerçevesinin İÇİNDEYİZ.
-    const common = { state, updateState, currentUser: previewUser, deepLink, onConsumeDeepLink: () => setDeepLink(null), canWrite: true, mobileMode: true };
+    const common = { state, updateState, currentUser: previewUser, currentUserObj: { name: previewUser }, deepLink, onConsumeDeepLink: () => setDeepLink(null), canWrite: true, mobileMode: true };
     if (activePage === "Teknik") return <Teknik {...common} />;
     if (activePage === "Güvenlik") return <Guvenlik {...common} />;
     if (activePage === "Temizlik") return <Temizlik {...common} />;

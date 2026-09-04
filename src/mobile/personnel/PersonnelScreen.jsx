@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PersonnelListScreen } from "./PersonnelListScreen.jsx";
 import { PersonCard } from "./PersonCard.jsx";
 import { DetailScreen } from "../detail/DetailScreen.jsx";
@@ -7,9 +7,19 @@ import { DetailScreen } from "../detail/DetailScreen.jsx";
 // Görev üzerinde yazma aksiyonu YOK burada (StickyActions/QuickActions
 // gizli, bkz. DetailScreen canWrite) — Personel rehberi salt görüntüleme,
 // kayıt düzenleme zaten kendi modülünde (Talep yönetimi) yapılıyor.
-export function PersonnelScreen({ state, currentUser, role }) {
-  const [person, setPerson] = useState(null);
+// Kullanıcı teyidiyle: "Mobil Yönetici anasayfasında personellerin listesi
+// gelsin... basınca personel detayı gelecek" — Dashboard > PersonnelAccordion
+// bir kişiye tıklayınca `initialPerson` ile buraya gelir, o kişi seçili
+// açılır; tüketilince (onConsumeInitialPerson) sıradan "Personel" menü
+// girişinden gelindiğinde tekrar devreye girmez.
+export function PersonnelScreen({ state, currentUser, role, initialPerson, onConsumeInitialPerson }) {
+  const [person, setPerson] = useState(initialPerson || null);
   const [detailTask, setDetailTask] = useState(null);
+
+  useEffect(() => {
+    if (initialPerson) { setPerson(initialPerson); onConsumeInitialPerson?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPerson]);
 
   if (detailTask) {
     const live = state.tasks.find((tk) => tk.id === detailTask.id) || detailTask;

@@ -17,6 +17,7 @@ const TABS = [
   { key: "kompanzasyon", label: "Kompanzasyon Ölçümü" },
   { key: "su", label: "Su Okuma" },
   { key: "dogalgaz", label: "Doğalgaz Okuma" },
+  { key: "elektrik", label: "Elektrik Okuma" },
 ];
 
 // Sayaçlar artık düz Kat/Blok seçimi yerine gerçek Mahal Kontrol konum
@@ -157,7 +158,6 @@ function CompensationLog({ items, points, onAdd, onRemove, canWrite = true }) {
         </div>
       )}
       <Card style={{ marginBottom: 16 }}>
-        {activePointId && <div style={{ fontSize: 11, color: T.accent, marginBottom: 10 }}>Bu ölçüm ilgili panonun Mahal Kontrol'üne gömülü — kontrolü yapan personel checklist'i doldururken aktif/reaktif gücü de girebilir, burası manuel/geriye dönük giriş içindir.</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 }}>
           <Field label="Tarih"><Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} /></Field>
           <Field label="Aktif Güç (kW)"><Input type="number" step="0.1" value={form.activeKw} onChange={(e) => setForm((f) => ({ ...f, activeKw: e.target.value }))} /></Field>
@@ -354,7 +354,6 @@ function MeterLog({ title, unit, valueField, meters, readings, mahalCatalog, thr
           <Card style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 2 }}>{currentMeter.name} — Yeni Okuma</div>
             {(currentMeter.room || currentMeter.floorLabel) && <div style={{ fontSize: 11, color: T.dim, marginBottom: 2 }}>Konum: {meterLocationLabel(currentMeter)}</div>}
-            {currentMeter.mahalKey && <div style={{ fontSize: 11, color: T.accent, marginBottom: 10 }}>Bu sayaç ilgili Mahal Kontrol'e gömülü — kontrolü yapan personel checklist'i doldururken okumayı da girebilir, burası manuel/geriye dönük giriş içindir.</div>}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 }}>
               <Field label="Tarih"><Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} /></Field>
               <Field label={`Sayaç Değeri (${unit})`}><Input type="number" value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))} /></Field>
@@ -399,7 +398,10 @@ export function Enerji({ state, updateState, canWrite = true }) {
   const pct = Math.round(((thisMonth - lastMonth) / lastMonth) * 100);
   const spikeDay = state.energyDaily.reduce((max, d) => (d.kwh > max.kwh ? d : max), state.energyDaily[0]);
   const mahalCatalog = buildMahalCatalog(state.mahalPoints);
-  const compensationPoints = state.mahalPoints.filter((p) => p.compensation).map((p) => ({ id: p.id, label: p.name }));
+  // Kullanıcı teyidiyle: "kompanzasyonlarıda ayrı belirt" — artık mahalPoints
+  // üzerindeki eski `compensation:true` bayrağı değil, kendi bağımsız listesi
+  // (bkz. mockData.js COMPENSATION_PANELS).
+  const compensationPoints = state.compensationPanels.map((p) => ({ id: p.id, label: p.name }));
 
   return (
     <div>
@@ -481,6 +483,24 @@ export function Enerji({ state, updateState, canWrite = true }) {
           onUpdateMeter={(id, patch) => updateState({ gasMeters: state.gasMeters.map((m) => (m.id === id ? { ...m, ...patch } : m)) })}
           onAdd={(r) => updateState({ gasReadings: [...state.gasReadings, { id: `gr_${Date.now()}`, ...r }] })}
           onRemove={(id) => { if (window.confirm("Bu okumayı silmek istediğinize emin misiniz? Kayıt arşivlenecek.")) updateState({ gasReadings: state.gasReadings.map((r) => (r.id === id ? { ...r, archived: true, archivedAt: new Date().toISOString() } : r)) }); }}
+        />
+        </>
+      )}
+
+      {tab === "elektrik" && (
+        <>
+        <MeterReadingTable state={state} meters={state.electricMeters.filter((m) => !m.archived)} valueField="value" unit="kWh" />
+        <MeterLog title="Elektrik Okuma" unit="kWh" valueField="value" meters={state.electricMeters.filter((m) => !m.archived)} readings={state.electricReadings.filter((r) => !r.archived)} mahalCatalog={mahalCatalog} thresholdPct={state.meterWarningThresholdPct} canWrite={canWrite}
+          onAddMeter={(name, floorLabel, side, room, mahalKey, initialReading) => {
+            const id = `em_${Date.now()}`;
+            const electricMeters = [...state.electricMeters, { id, name, floorLabel, side, room, mahalKey }];
+            const electricReadings = initialReading != null ? [...state.electricReadings, { id: `er_${Date.now()}`, meterId: id, date: new Date().toISOString().slice(0, 10), value: initialReading, note: "İlk okuma" }] : state.electricReadings;
+            updateState({ electricMeters, electricReadings });
+          }}
+          onRemoveMeter={(id) => { if (window.confirm("Bu elektrik sayacını silmek istediğinize emin misiniz? Sayaç arşivlenecek, geçmiş okumaları raporlarda kalmaya devam edecek.")) updateState({ electricMeters: state.electricMeters.map((m) => (m.id === id ? { ...m, archived: true, archivedAt: new Date().toISOString() } : m)) }); }}
+          onUpdateMeter={(id, patch) => updateState({ electricMeters: state.electricMeters.map((m) => (m.id === id ? { ...m, ...patch } : m)) })}
+          onAdd={(r) => updateState({ electricReadings: [...state.electricReadings, { id: `er_${Date.now()}`, ...r }] })}
+          onRemove={(id) => { if (window.confirm("Bu okumayı silmek istediğinize emin misiniz? Kayıt arşivlenecek.")) updateState({ electricReadings: state.electricReadings.map((r) => (r.id === id ? { ...r, archived: true, archivedAt: new Date().toISOString() } : r)) }); }}
         />
         </>
       )}

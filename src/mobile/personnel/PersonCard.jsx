@@ -4,7 +4,8 @@ import { mobileTokens as t } from "../tokens.js";
 import { initials, formatDateOnlyTR } from "../taskDisplay.js";
 import { RecordCard } from "../list/RecordCard.jsx";
 import { PriorityGroup } from "../list/PriorityGroup.jsx";
-import { computePersonStats, computeDepartmentAvgClosureDays, lastCompletedTask, openTasksByCategory } from "./personStats.js";
+import { computePersonStats, computeDepartmentAvgClosureDays, openTasksByCategory, lastKnownFloor } from "./personStats.js";
+import { taskHasAssignee } from "../../lib/taskAssignees.js";
 
 const TABS = [{ key: "ozet", label: "Özet" }, { key: "acik", label: "Açık işler" }, { key: "istatistik", label: "İstatistik" }];
 
@@ -12,10 +13,6 @@ function fmtDays(d) {
   if (d == null) return "—";
   if (d < 1) return `${Math.round(d * 24)} sa`;
   return `${d.toFixed(1)} gün`;
-}
-function fmtDate(iso) {
-  if (!iso) return null;
-  try { return new Date(iso).toLocaleDateString("tr-TR"); } catch { return null; }
 }
 
 function Row({ label, value }) {
@@ -60,7 +57,16 @@ export function PersonCard({ person, currentUser, viewerRole, state, onBack, onO
     setOpenCatGroups((s) => { const next = new Set(s); next.has(key) ? next.delete(key) : next.add(key); return next; });
   }
   const categories = openTasksByCategory(state.tasks, person);
-  const lastDone = lastCompletedTask(state.tasks, person.name);
+  const lastSeen = lastKnownFloor(state, person.name);
+  // Kullanıcı teyidiyle: "personelin üzerindeki işler sıralandığında kırmızı
+  // olsun bittiğinde yeşil arka plan olsun" — RecordCard artık task.status'a
+  // göre otomatik renkleniyor (bkz. RecordCard.jsx), ama bu ekranda YEŞİL
+  // hiç görünmüyordu çünkü sadece açık işler listeleniyordu — son
+  // tamamlanan birkaç iş de eklendi (kırmızı+yeşil bir arada görülsün).
+  const recentCompleted = (state.tasks || [])
+    .filter((t) => taskHasAssignee(t, person.name) && t.status === "Tamamlandı" && t.completedAt)
+    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+    .slice(0, 5);
   const stats = canSeePrivate ? computePersonStats(state.tasks, person.name) : null;
   const deptAvg = canSeePrivate ? computeDepartmentAvgClosureDays(state.tasks, person.department) : null;
 
@@ -102,6 +108,7 @@ export function PersonCard({ person, currentUser, viewerRole, state, onBack, onO
           <div>
             <Row label="Görev" value={person.role} />
             <Row label="Departman" value={person.department} />
+            <Row label="Son Görülen" value={lastSeen ? `${lastSeen.floor} · ${new Date(lastSeen.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${lastSeen.stale ? " (bir süre önce)" : ""}` : null} />
             {/* Kişisel telefon — spec: "yalnız Yönetim rolüne görünür, diğer
                 roller dahili numarayı görür." Bu depoda tek bir `phone` alanı
                 var (ayrı bir dahili-numara alanı yok) — o yüzden yetkisiz
@@ -165,13 +172,14 @@ export function PersonCard({ person, currentUser, viewerRole, state, onBack, onO
                 </PriorityGroup>
               </div>
             )}
-            {lastDone && (
-              <div style={{ marginTop: 16 }}>
-                <p style={{ margin: "0 0 6px", fontSize: 11.5, color: t.muted, textTransform: "uppercase", letterSpacing: 0.3 }}>Son tamamlanan iş</p>
-                <div style={{ padding: "10px 0", borderTop: `1px solid ${t.hairline}` }}>
-                  <p style={{ margin: 0, fontSize: 13.5, color: t.ink }}>{lastDone.description}</p>
-                  <p style={{ margin: "3px 0 0", fontSize: 12, color: t.muted }}>{lastDone.location || lastDone.department} · {fmtDate(lastDone.completedAt)}</p>
-                </div>
+            {recentCompleted.length > 0 && (
+              <div style={{ margin: "16px -16px 0" }}>
+                <PriorityGroup label="Son Tamamlanan İşler" count={recentCompleted.length} color={t.ok} bg="rgba(78,138,70,0.10)"
+                  open={openCatGroups.has("completed")} onToggle={() => toggleCatGroup("completed")}>
+                  <div style={{ background: t.surface, borderTop: `1px solid ${t.hairline}` }}>
+                    {recentCompleted.map((task) => <RecordCard key={task.id} task={task} onOpen={onOpenTask} />)}
+                  </div>
+                </PriorityGroup>
               </div>
             )}
           </div>

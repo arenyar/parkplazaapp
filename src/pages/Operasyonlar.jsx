@@ -9,6 +9,7 @@ import { TALEP_TYPES } from "../mockData.js";
 import { buildFirmalar } from "../piramitData.js";
 import { uploadPhoto } from "../lib/storage.js";
 import StoredImage from "../components/StoredImage.jsx";
+import { stampStatusTiming } from "../lib/taskTiming.js";
 
 const STATUSES = ["Yapılacak", "Üzr. Çalışılıyor", "Tamamlandı", "İptal"];
 
@@ -70,7 +71,11 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   // ekranına düşecek" (bkz. MahalKontrol.jsx startQuickRequest). Firma
   // kaynaklı kayıtlarla (t.company) AYNI listede, saha kaydı rozetiyle
   // (bkz. TaskList.jsx) ayırt edilir.
-  const requests = state.tasks.filter((t) => (!!t.company || t.viaMahal) && !t.archived);
+  // Kullanıcı teyidiyle: "talep yönetimine planlı bakımlardaki iş
+  // emirlerini getirme" — Bakım Takvimi'nden işaretlenen Planlı Bakım
+  // kayıtları (bkz. Bakim.jsx) burada company/viaMahal eşleşse bile hiç
+  // görünmez, bu ekran sadece gerçek talep/şikayet için.
+  const requests = state.tasks.filter((t) => (!!t.company || t.viaMahal) && !t.archived && t.category !== "Planlı Bakım");
   const firmalar = buildFirmalar(state.piramitFloors);
   const companyOptions = [...new Set([...firmalar.map((f) => f.name), form.company].filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr"));
   const floorOptions = [...new Set([...state.piramitFloors.map((f) => f.label), form.location].filter(Boolean))];
@@ -133,11 +138,12 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
     };
     // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
     if (form.id) {
-      const tasks = state.tasks.map((t) => (t.id === form.id ? { ...t, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser } : t));
+      const prevTask = state.tasks.find((t) => t.id === form.id);
+      const tasks = state.tasks.map((t) => (t.id === form.id ? stampStatusTiming(prevTask?.status, { ...t, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser }) : t));
       updateState({ tasks });
     } else {
       const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-      const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...payload };
+      const task = stampStatusTiming(null, { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...payload });
       updateState({ tasks: [...state.tasks, task] });
     }
     setFormOpen(false);
@@ -329,7 +335,7 @@ export function Operasyonlar({ state, updateState, currentUser, onOpenTask, pend
               // "requests" ile AYNI kriter (t.company || t.viaMahal), tek
               // kaynak. viaMahal, mahal kontrolde "Uygunsuzluk gördüm" ile
               // açılan saha kayıtları da Talep/Şikayet sayılır.
-              const items = state.tasks.filter((t) => t.status === status && (!!t.company || t.viaMahal) && !t.archived);
+              const items = state.tasks.filter((t) => t.status === status && (!!t.company || t.viaMahal) && !t.archived && t.category !== "Planlı Bakım");
               return <StatusColumn key={status} status={status} items={items} onOpenTask={onOpenTask} />;
             })}
           </div>

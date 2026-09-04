@@ -12,6 +12,7 @@ const TABS = [
   { key: "genel", label: "Genel" },
   { key: "bakimlar", label: "Bakımlar" },
   { key: "departmanlar", label: "Departmanlar" },
+  { key: "talepturleri", label: "Talep Türleri" },
   { key: "yetkilendirme", label: "Kullanıcı Yetkilendirme" },
 ];
 
@@ -34,6 +35,108 @@ function ChipList({ title, items, onAdd, onRemove }) {
         <Input value={val} onChange={(e) => setVal(e.target.value)} placeholder="Yeni ekle…" style={{ flex: 1 }} />
         <Button variant="ghost" onClick={() => { if (val.trim()) { onAdd(val.trim()); setVal(""); } }}>Ekle</Button>
       </div>
+    </Card>
+  );
+}
+
+// Kullanıcı teyidiyle: "talep şikayetteki türleri ayarlarda bir yere al
+// tanımlama düzenleme yapabilelim" — hiyerarşik `state.taskTypes` (bkz.
+// mockData.js TASK_TYPES, TypePicker.jsx) artık burada CRUD edilebiliyor.
+// `isLeaf` elle işaretlenmiyor — bir türün ALTINDA en az bir çocuk varsa
+// otomatik "kategori" (seçilemez, sadece açılır) sayılır, yoksa "seçilebilir
+// tür" — TypePicker'ın zaten beklediği kural, admin bu ayrımı düşünmek
+// zorunda kalmasın diye her ekle/sil sonrası yeniden hesaplanır.
+function recomputeLeaf(types) {
+  const parentIds = new Set(types.map((t) => t.parentId).filter(Boolean));
+  return types.map((t) => ({ ...t, isLeaf: !parentIds.has(t.id) }));
+}
+function nextOrder(types, parentId) {
+  const siblings = types.filter((t) => (t.parentId || null) === (parentId || null));
+  return siblings.length > 0 ? Math.max(...siblings.map((s) => s.order || 0)) + 1 : 1;
+}
+
+function TaskTypeNode({ node, depth, types, onAdd, onRemove, onRename, canWrite }) {
+  const T = useTheme();
+  const [addingChild, setAddingChild] = useState(false);
+  const [childLabel, setChildLabel] = useState("");
+  const children = types.filter((t) => t.parentId === node.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  function confirmAddChild() {
+    if (!childLabel.trim()) return;
+    onAdd(node.id, childLabel.trim());
+    setChildLabel("");
+    setAddingChild(false);
+  }
+
+  return (
+    <div style={{ marginLeft: depth * 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${T.line}` }}>
+        <Input value={node.label} disabled={!canWrite} onChange={(e) => onRename(node.id, e.target.value)}
+          style={{ flex: 1, fontSize: 12.5, padding: "6px 8px" }} />
+        <span style={{ fontSize: 10, color: T.dimmer, flexShrink: 0 }}>{node.isLeaf ? "seçilebilir" : "kategori"}</span>
+        {canWrite && (
+          <>
+            <button onClick={() => setAddingChild((s) => !s)} title="Alt tür ekle" style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", color: T.accent, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>+ Alt</button>
+            <button onClick={() => onRemove(node.id)} title="Sil" style={{ background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex", flexShrink: 0 }}><X size={14} /></button>
+          </>
+        )}
+      </div>
+      {addingChild && (
+        <div style={{ display: "flex", gap: 6, marginLeft: 18, marginTop: 6, marginBottom: 6 }}>
+          <Input value={childLabel} onChange={(e) => setChildLabel(e.target.value)} placeholder="Alt tür adı…" style={{ flex: 1, fontSize: 12.5 }} autoFocus />
+          <Button variant="ghost" onClick={confirmAddChild}>Ekle</Button>
+        </div>
+      )}
+      {children.map((child) => (
+        <TaskTypeNode key={child.id} node={child} depth={depth + 1} types={types} onAdd={onAdd} onRemove={onRemove} onRename={onRename} canWrite={canWrite} />
+      ))}
+    </div>
+  );
+}
+
+function TaskTypesEditor({ state, updateState, canWrite }) {
+  const T = useTheme();
+  const types = state.taskTypes || [];
+  const roots = types.filter((t) => !t.parentId).sort((a, b) => (a.order || 0) - (b.order || 0));
+  const [newRootLabel, setNewRootLabel] = useState("");
+
+  function addType(parentId, label) {
+    const id = `tt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const next = [...types, { id, parentId: parentId || null, order: nextOrder(types, parentId), label, isLeaf: true }];
+    updateState({ taskTypes: recomputeLeaf(next) });
+  }
+  function removeType(id) {
+    // Alt türleri de birlikte kaldır — yarım kalmış, ebeveynsiz bir dal
+    // bırakmamak için (TypePicker parentId'si artık yok olan bir düğüme
+    // asla ulaşamaz, sessizce kaybolurdu).
+    const toRemove = new Set([id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      types.forEach((t) => { if (t.parentId && toRemove.has(t.parentId) && !toRemove.has(t.id)) { toRemove.add(t.id); grew = true; } });
+    }
+    updateState({ taskTypes: recomputeLeaf(types.filter((t) => !toRemove.has(t.id))) });
+  }
+  function renameType(id, label) {
+    updateState({ taskTypes: types.map((t) => (t.id === id ? { ...t, label } : t)) });
+  }
+
+  return (
+    <Card>
+      <CardTitle>Talep / Şikayet Türleri</CardTitle>
+      <p style={{ fontSize: 11.5, color: T.dimmer, margin: "0 0 12px" }}>
+        Talep yönetimi formundaki "Tür" seçicisinde (mobil + masaüstü) görünen hiyerarşik liste — buradan ekleyip düzenleyebilirsiniz. Bir türün altına "+ Alt" ile ikinci bir seviye eklenebilir.
+      </p>
+      {roots.map((node) => (
+        <TaskTypeNode key={node.id} node={node} depth={0} types={types} onAdd={addType} onRemove={removeType} onRename={renameType} canWrite={canWrite} />
+      ))}
+      {roots.length === 0 && <p style={{ fontSize: 12.5, color: T.dim }}>Henüz tanım yok.</p>}
+      {canWrite && (
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <Input value={newRootLabel} onChange={(e) => setNewRootLabel(e.target.value)} placeholder="Yeni ana kategori/tür…" style={{ flex: 1 }} />
+          <Button variant="ghost" onClick={() => { if (newRootLabel.trim()) { addType(null, newRootLabel.trim()); setNewRootLabel(""); } }}>Ekle</Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -220,6 +323,29 @@ export function Ayarlar({ state, updateState, canWrite = true }) {
                 onChange={(e) => updateInvoiceSettings({ dueDays: e.target.value === "" ? 0 : Number(e.target.value) })} />
             </Field>
           </Card>
+
+          {/* Kullanıcı teyidiyle: "android kısmında yap ayarların içine link
+              koy" — iOS için mobil web (/mobil) zaten kullanılıyor, Android
+              personeli için gerçek bir .apk. Bu makinede JDK/Android SDK
+              kurulu değil, o yüzden .apk burada üretilemiyor — GitHub
+              Actions (bkz. .github/workflows/android-build.yml) her push'ta
+              otomatik derleyip AYNI sabit release linkine yüklüyor, link
+              build'den build'e değişmiyor. Depo push edilip en az bir build
+              tamamlanana kadar bu link 404 verir — bilerek: uydurma bir
+              "hazır" görünümü yerine gerçek durumu yansıtıyor. */}
+          <Card>
+            <CardTitle>Mobil Uygulama (Android)</CardTitle>
+            <p style={{ fontSize: 11, color: T.dimmer, margin: "0 0 12px" }}>
+              iOS için mobil web sürümü (/mobil) kullanılır. Android personeli için kurulabilir bir uygulama — her koda yapılan push'ta otomatik derlenir, aşağıdaki link her zaman en güncel sürümü indirir.
+            </p>
+            <a href="https://github.com/arenyar/parkplazaapp/releases/download/android-latest/park-plaza-saha.apk" target="_blank" rel="noreferrer"
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none", border: "none", borderRadius: 999, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: deptColor("Yönetim"), color: "#fff" }}>
+              <Smartphone size={15} /> Android Uygulamasını İndir (.apk)
+            </a>
+            <p style={{ fontSize: 10.5, color: T.dimmer, margin: "10px 0 0" }}>
+              Kurulumdan önce telefonda "Bilinmeyen kaynaklardan yükleme" izni açılmalı — bu Play Store dışı, sadece şirket içi dağıtım için bir .apk.
+            </p>
+          </Card>
         </div>
       )}
 
@@ -238,6 +364,13 @@ export function Ayarlar({ state, updateState, canWrite = true }) {
           <ChipList title="Departmanlar" items={state.departments}
             onAdd={(v) => canWrite && updateState({ departments: [...state.departments, v] })}
             onRemove={(v) => canWrite && updateState({ departments: state.departments.filter((d) => d !== v) })} />
+        </div>
+      )}
+
+      {tab === "talepturleri" && (
+        <div>
+          <PageHeader title="Talep Türleri" subtitle="Talep / Şikayet formundaki hiyerarşik Tür seçeneklerini buradan tanımlayın" />
+          <TaskTypesEditor state={state} updateState={updateState} canWrite={canWrite} />
         </div>
       )}
 

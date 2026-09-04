@@ -6,6 +6,7 @@
 // kopyasını yazmadı. Sayfa boyutu/kesme kuralları zaten var olan
 // `.fatura-sayfa` / `.invoice-print-area` (bkz. GlobalStyle.jsx @media
 // print) mekanizmasını kullanıyor, yeni bir PDF kütüphanesi eklenmedi.
+import StoredImage from "./StoredImage.jsx";
 
 // Logo: state.invoiceSettings.logoUrl verilirse görsel, yoksa (kullanıcı
 // teyidiyle: "park plaza logosunu koy") metin amblem — ReportPage'in eski
@@ -44,7 +45,7 @@ export function FindingsPage({ branding, logoUrl, printDate, items }) {
         {items.map((it, i) => (
           <div key={i} style={{ display: "flex", gap: 10, border: "1px solid #ddd", borderRadius: 8, padding: 10, pageBreakInside: "avoid" }}>
             {it.photoUrl ? (
-              <img src={it.photoUrl} alt="" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
+              <StoredImage src={it.photoUrl} alt="" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
             ) : (
               <div style={{ width: 90, height: 90, borderRadius: 6, flexShrink: 0, background: "#f1efe7" }} />
             )}

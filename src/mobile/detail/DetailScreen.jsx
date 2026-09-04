@@ -36,6 +36,7 @@ function buildTimeline(task) {
   const typeLabel = task.typePath || task.issueType || "";
   const events = [];
   if (task.createdAt) events.push({ at: task.createdAt, name: "Oluşturuldu", by: task.createdBy || task.requester, status: "Yapılacak" });
+  if (task.startedAt) events.push({ at: task.startedAt, name: "İşe Başlandı", by: task.assignee, status: "Üzr. Çalışılıyor" });
   if (task.updatedAt && task.updatedAt !== task.createdAt) events.push({ at: task.updatedAt, name: "Güncellendi", by: task.updatedBy, status: task.status });
   if (task.completedAt) events.push({ at: task.completedAt, name: "Tamamlandı", by: task.updatedBy || task.assignee, status: "Tamamlandı" });
   if (task.archivedAt) events.push({ at: task.archivedAt, name: "Arşivlendi", by: task.archivedBy, status: "İptal" });
@@ -56,11 +57,18 @@ export function DetailScreen({ task, canWrite = true, onBack, onEdit, onAdvanceS
   const place = placeOf(task);
   const dateRange = [fmt(task.createdAt), formatDateOnlyTR(task.dueDate)].filter(Boolean).join(" → ");
 
+  // Kullanıcı teyidiyle: "iş emrinde işi başlat yaptıktan sonra işi bitir
+  // butonu olmalı, işe başlama zamanı ile işin bitiş zamanını ölçelim" —
+  // aynı iki aksiyon zaten vardı ("Devam ediyor"/"Tamamlandı"), sadece
+  // başlangıç/bitiş niyetini netleştirmek için yeniden adlandırıldı; gerçek
+  // zaman damgalama artık her ikisinde de garanti (bkz. onAdvanceStatus →
+  // TaskListScreen.jsx advanceStatus, onEdit → saveTask, ikisi de
+  // stampStatusTiming kullanıyor).
   const actions = task.status === "Tamamlandı"
     ? [{ label: "Düzenle", variant: "secondary", onClick: onEdit }]
     : [
-        ...(task.status === "Yapılacak" ? [{ label: "Devam ediyor", variant: "secondary", onClick: () => onAdvanceStatus("Üzr. Çalışılıyor") }] : []),
-        { label: "Tamamlandı", variant: "primary", onClick: () => onEdit({ status: "Tamamlandı" }) },
+        ...(task.status === "Yapılacak" ? [{ label: "İşi Başlat", variant: "secondary", onClick: () => onAdvanceStatus("Üzr. Çalışılıyor") }] : []),
+        { label: "İşi Bitir", variant: "primary", onClick: () => onEdit({ status: "Tamamlandı" }) },
       ];
 
   return (

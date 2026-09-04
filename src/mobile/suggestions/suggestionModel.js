@@ -15,12 +15,9 @@ export const STATUS_COLORS = {
 
 // "Göreve dönüştür" — spec: "Kabul edilen öneri Göreve dönüştür ile
 // Görevler modülüne aktarılır." Bu depoda "Görevler" ayrı bir koleksiyon
-// değil, aynı state.tasks içinde bir kapsam (bkz. navConfig.js
-// OPERASYONLAR_SCOPES.gorevler — category "Planlı Bakım" filtresi, Faz 3).
-// Bir öneri gerçek bir planlı bakım değil, o filtreye ZORLA sokmak yanlış
-// olurdu — bunun yerine normal bir görev olarak state.tasks'a eklenir,
-// "Talep yönetimi" (tüm kayıtlar) altında görünür ve `sourceSuggestionId`
-// ile öneriye bağlı kalır.
+// değil, aynı state.tasks — normal bir görev olarak eklenir, "Talep
+// yönetimi" (tüm kayıtlar) altında görünür ve `sourceSuggestionId` ile
+// öneriye bağlı kalır.
 export function departmentForCategory(category) {
   return category === "İSG" ? "İSG" : "Yönetim";
 }

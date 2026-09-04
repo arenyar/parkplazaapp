@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, PlayCircle, CheckCircle2, AlertTriangle, Eye } from "lucide-react";
+import { ArrowLeft, PlayCircle, CheckCircle2, AlertTriangle, Eye, CalendarClock } from "lucide-react";
 import { mobileTokens as t } from "../tokens.js";
 import { STATUS_COLOR, formatDateOnlyTR } from "../taskDisplay.js";
 import { activeEscort, canCloseMaintenanceDirectly, startEscort, completeEscort, addObserver, closeWithOverride } from "../../lib/escort.js";
@@ -37,6 +37,23 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
   const [noteDraft, setNoteDraft] = useState("");
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
+  // Kullanıcı teyidiyle: "refakat tıkladığında personel seçip iş emrini
+  // kapatsın" — önceden "Refakat Et" doğrudan currentUser.name ile
+  // başlayıp AYRI bir "Refakati Tamamla" adımı gerektiriyordu (telefonu
+  // tutan = refakat eden varsayımı, kendi kaydını kendi kapatır). Artık bir
+  // sorumlu/şef sahada işi GERÇEKTEN yapan personeli seçip TEK adımda
+  // kapatabiliyor — startEscort+completeEscort arka arkaya (escort.js'in
+  // ikisi de zaten personelName parametresi alıyordu, sadece UI hep
+  // currentUser ile iki ayrı tıklamada çağırıyordu).
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedPerson, setPickedPerson] = useState(currentUser.name);
+  const [pickerNote, setPickerNote] = useState("");
+  // Kullanıcı teyidiyle: "bakım takviminde bakım öteleme oluyor bakım
+  // öteleme tuşu ile tarih değiştir" — sadece dueDate güncelleyen basit bir
+  // aksiyon, yeni bir veri alanı/kayıt icat edilmedi (mevcut "Planlanan
+  // tarih" alanının kendisi).
+  const [postponeOpen, setPostponeOpen] = useState(false);
+  const [postponeDate, setPostponeDate] = useState(task.dueDate || "");
 
   const item = findMaintenanceItem(state.maintenance, task);
   const escort = activeEscort(task);
@@ -44,11 +61,23 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
   const canCloseDirect = canCloseMaintenanceDirectly(task, viewerRole);
   const done = task.status === "Tamamlandı";
   const statusColor = STATUS_COLOR[task.status] || t.muted;
+  const deptTeam = (state.team || []).filter((p) => p.department === task.department);
 
-  function handleStart() { onSave(startEscort(task, currentUser.name)); }
+  function handleStart() { setPickedPerson(currentUser.name); setPickerNote(""); setPickerOpen(true); }
+  function confirmClose() {
+    if (!pickedPerson) return;
+    onSave(completeEscort(startEscort(task, pickedPerson), { note: pickerNote }));
+    setPickerOpen(false);
+    setPickerNote("");
+  }
   function handleComplete() { onSave(completeEscort(task, { note: noteDraft })); setNoteDraft(""); }
   function handleObserve() { onSave(addObserver(task, currentUser.name)); }
   function handleOverrideClose() { onSave(closeWithOverride(task, { closedBy: currentUser.name, reason: overrideReason })); setOverrideOpen(false); setOverrideReason(""); }
+  function confirmPostpone() {
+    if (!postponeDate) return;
+    onSave({ ...task, dueDate: postponeDate, updatedAt: new Date().toISOString(), updatedBy: currentUser.name });
+    setPostponeOpen(false);
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100%", background: t.ivory }}>
@@ -71,6 +100,17 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
         <Row label="Ekipman / Mahal" value={task.assetId || item?.assetId} />
         <Row label="Planlanan tarih" value={formatDateOnlyTR(task.dueDate)} />
         <Row label="Yüklenici firma" value={item?.firma} />
+        {canWrite && !done && postponeOpen && (
+          <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 4, background: t.surface, border: `1px solid ${t.hairline}` }}>
+            <label style={{ display: "block", fontSize: 11.5, color: t.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 }}>Yeni tarih</label>
+            <input type="date" value={postponeDate} onChange={(e) => setPostponeDate(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 4, border: `1px solid ${t.hairline}`, fontSize: 13.5, fontFamily: "inherit", color: t.ink, background: t.ivory, marginBottom: 10 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={confirmPostpone} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", flex: 1, minHeight: 40, textAlign: "center", borderRadius: 4, background: t.pine, color: "#fff", fontSize: 13, fontWeight: 700 }}>Tarihi Güncelle</button>
+              <button onClick={() => setPostponeOpen(false)} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", flex: 1, minHeight: 40, textAlign: "center", borderRadius: 4, border: `1px solid ${t.hairline}`, color: t.ink, fontSize: 13, fontWeight: 700 }}>Vazgeç</button>
+            </div>
+          </div>
+        )}
         {escort && (
           <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 4, background: t.amberSoft, border: `1px solid ${t.hairline}` }}>
             <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: t.ink }}>
@@ -84,6 +124,23 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
         )}
         {done && task.escort?.endedAt && (
           <Row label="Refakat notu" value={task.escort.note} />
+        )}
+        {pickerOpen && (
+          <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 4, background: t.surface, border: `1px solid ${t.hairline}` }}>
+            <label style={{ display: "block", fontSize: 11.5, color: t.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 }}>Refakat eden personel</label>
+            <select value={pickedPerson} onChange={(e) => setPickedPerson(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", borderRadius: 4, border: `1px solid ${t.hairline}`, fontSize: 13.5, fontFamily: "inherit", color: t.ink, background: t.ivory, marginBottom: 10 }}>
+              {deptTeam.length === 0 && <option value={currentUser.name}>{currentUser.name}</option>}
+              {deptTeam.map((p) => <option key={p.id} value={p.name}>{p.name} · {p.role}</option>)}
+            </select>
+            <label style={{ display: "block", fontSize: 11.5, color: t.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>Not (opsiyonel)</label>
+            <textarea value={pickerNote} onChange={(e) => setPickerNote(e.target.value)} placeholder="Yapılan işi kısaca yazın"
+              style={{ width: "100%", minHeight: 50, boxSizing: "border-box", padding: "8px 10px", borderRadius: 4, border: `1px solid ${t.hairline}`, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={confirmClose} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", flex: 1, minHeight: 40, textAlign: "center", borderRadius: 4, background: t.ok, color: "#fff", fontSize: 13, fontWeight: 700 }}>İş Emrini Kapat</button>
+              <button onClick={() => setPickerOpen(false)} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", flex: 1, minHeight: 40, textAlign: "center", borderRadius: 4, border: `1px solid ${t.hairline}`, color: t.ink, fontSize: 13, fontWeight: 700 }}>Vazgeç</button>
+            </div>
+          </div>
         )}
         {done && !task.escort && task.resolution?.startsWith("Yönetim gerekçesiyle") && (
           <Row label="Kapanış gerekçesi" value={task.resolution} />
@@ -115,7 +172,7 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
           <div style={{ display: "flex", gap: 8 }}>
             {!escort && (
               <button onClick={handleStart} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", flex: 1, minHeight: 44, textAlign: "center", borderRadius: 4, background: t.pine, color: "#fff", fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <PlayCircle size={16} aria-hidden="true" /> Refakat Et
+                <PlayCircle size={16} aria-hidden="true" /> Refakat Et / Kapat
               </button>
             )}
             {isMine && (
@@ -132,6 +189,10 @@ export function MaintenanceDetailScreen({ task, state, currentUser, viewerRole, 
               <AlertTriangle size={16} aria-hidden="true" /> Arıza Bildir
             </button>
           </div>
+          <button onClick={() => { setPostponeDate(task.dueDate || ""); setPostponeOpen((s) => !s); }}
+            style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", minHeight: 40, textAlign: "center", borderRadius: 4, border: `1px solid ${t.hairline}`, color: t.ink, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <CalendarClock size={15} aria-hidden="true" /> Bakımı Ertele
+          </button>
           {!canCloseDirect && !escort && viewerRole === "Yönetim" && (
             overrideOpen ? (
               <button onClick={handleOverrideClose} style={{ all: "unset", boxSizing: "border-box", cursor: "pointer", minHeight: 40, textAlign: "center", borderRadius: 4, border: `1px solid ${t.kiremit}`, color: t.kiremit, fontSize: 13, fontWeight: 700 }}>

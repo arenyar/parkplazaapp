@@ -4,8 +4,9 @@ import { T } from "../theme.js";
 import { PageHeader, Button } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
-import { MobileTaskList } from "../components/MobileTaskList.jsx";
+import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScreen.jsx";
 import { MahalKontrol } from "./MahalKontrol.jsx";
+import { stampStatusTiming } from "../lib/taskTiming.js";
 
 const TABS = [
   { key: "mahal", label: "Mahal Kontrol" },
@@ -35,15 +36,13 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
   function save() {
     if (!form.description.trim()) return;
     const id = form.id || `t_${Date.now()}`;
-    const payload = { ...form, id, department: "Temizlik", createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
+    const prevTask = form.id ? state.tasks.find((t) => t.id === id) : null;
+    const payload = stampStatusTiming(prevTask?.status, { ...form, id, department: "Temizlik", createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser });
     const tasks = form.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
     updateState({ tasks });
     setFormOpen(false);
   }
   function remove(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
-  function saveMobileTask(updated) {
-    updateState({ tasks: state.tasks.map((t) => (t.id === updated.id ? updated : t)) });
-  }
 
   return (
     <div>
@@ -66,10 +65,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <div>
-            <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt`} />
-            <MobileTaskList tasks={deptTasks} onSaveTask={saveMobileTask} emptyText="Kayıt yok." />
-          </div>
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Temizlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Temizlik departmanının işleri ve firma talepleri`}

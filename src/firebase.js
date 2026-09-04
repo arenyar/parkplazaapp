@@ -1,5 +1,5 @@
 import { initializeApp, deleteApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, createUserWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 import { showToast } from "./lib/toast.js";
 
@@ -24,7 +24,32 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+// Kullanıcı teyidiyle: "telefon çekmeyen yerlerde offline çalışır telefon
+// çekince update yapar" — Firestore'un kendi kalıcı (IndexedDB) önbelleği
+// AÇILDI. Öncesinde db bellekte tutuluyordu: sinyal kesilince onSnapshot
+// hiç veri vermiyordu (ekran boş/donmuş kalırdı) ve o sırada yapılan
+// setDoc çağrıları anında "unavailable" ile reddediliyordu (bkz. saveState,
+// draftQueue.js'in ELLE yeniden deneme kuyruğu bu yüzden vardı). Artık:
+// - Sayfa açılışında/offline'ken en son senkron olmuş veri diskten hemen
+//   gösterilir (subscribeState'teki fromCache artık gerçek anlamını taşıyor).
+// - Offline'ken yapılan yazmalar SDK tarafından yerelde kuyruğa alınır,
+//   setDoc'un Promise'i reddetmez; sinyal dönünce OTOMATİK gönderilir —
+//   draftQueue.js'in elle kuyruğu artık bir güvenlik ağı, birincil yol değil.
+// persistentMultipleTabManager: aynı tarayıcıda birden fazla sekme/pencere
+// (ör. masaüstü + mobil önizleme) AYNI diskteki önbelleği güvenle paylaşır.
+// IndexedDB desteklenmeyen bir ortamda initializeFirestore reddedilirse
+// (çok nadir — ör. bazı eski private-browsing modları) belleğe düşer,
+// uygulama önceki (kalıcılıksız) davranışıyla çalışmaya devam eder.
+let firestoreDb;
+try {
+  firestoreDb = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (err) {
+  console.error("Firestore kalıcı önbellek açılamadı, bellek-içi moda düşülüyor:", err);
+  firestoreDb = getFirestore(app);
+}
+export const db = firestoreDb;
 export const auth = getAuth(app);
 
 // Kullanıcı teyidiyle bulunan sorun: "veritabanı tamamen açık... database

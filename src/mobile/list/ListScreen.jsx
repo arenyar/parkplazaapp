@@ -39,7 +39,11 @@ export function ListScreen({
 }) {
   const list = items || tasks || [];
   const openItem = onOpenItem || onOpenTask;
-  const assigneeOf = getAssignee || ((it) => it.assignee);
+  // Kullanıcı teyidiyle: "iş emirlerine birden fazla personel de
+  // seçilebilsin" — varsayılan assigneeOf artık (varsa) `assignees`
+  // dizisini döner; "Bana atananlar" karşılaştırması (aşağıda) hem dizi
+  // hem eski tekil string değeri için doğru çalışır.
+  const assigneeOf = getAssignee || ((it) => (Array.isArray(it.assignees) && it.assignees.length > 0 ? it.assignees : it.assignee));
   const groupField = groupBy?.field || ((it) => it.priority);
   const groupOrder = groupBy?.order || PRIORITY_ORDER;
   const groupColors = groupBy?.colors || PRIORITY_COLORS;
@@ -55,7 +59,12 @@ export function ListScreen({
     setOpenGroups((s) => { const next = new Set(s); next.has(label) ? next.delete(label) : next.add(label); return next; });
   }
 
-  const scoped = list.filter((it) => !it.archived && (kapsam === kapsamLabels[0] || assigneeOf(it) === currentUserName));
+  const scoped = list.filter((it) => {
+    if (it.archived) return false;
+    if (kapsam === kapsamLabels[0]) return true;
+    const av = assigneeOf(it);
+    return Array.isArray(av) ? av.includes(currentUserName) : av === currentUserName;
+  });
   const groups = groupOrder
     .map((label) => ({ label, items: sort(scoped.filter((it) => groupField(it) === label), sortMode) }))
     .filter((g) => g.items.length > 0);

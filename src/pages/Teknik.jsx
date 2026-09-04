@@ -4,10 +4,14 @@ import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Button } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
-import { MobileTaskList } from "../components/MobileTaskList.jsx";
+import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScreen.jsx";
 import { Bakim } from "./Bakim.jsx";
 import { MahalKontrol } from "./MahalKontrol.jsx";
 import { SayacOkuma } from "./SayacOkuma.jsx";
+import { MaintenanceScreen } from "../mobile/maintenance/MaintenanceScreen.jsx";
+import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
+import { stampStatusTiming } from "../lib/taskTiming.js";
+import { consumeStockPatch } from "../lib/stock.js";
 
 const TABS = [
   { key: "takvim", label: "Bakım Takvimi" },
@@ -30,7 +34,7 @@ const TABS = [
 // tıklayınca gerçekten istediği ekran zaten Mahal Kontrol.
 const MOBILE_DEFAULT_TAB = "mahal";
 
-export function Teknik({ state, updateState, currentUser, role, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+export function Teknik({ state, updateState, currentUser, currentUserObj, role, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
   const T = useTheme();
   const [tab, setTab] = useState(mobileMode ? MOBILE_DEFAULT_TAB : "takvim");
   const [formOpen, setFormOpen] = useState(false);
@@ -59,9 +63,17 @@ export function Teknik({ state, updateState, currentUser, role, deepLink, onCons
   function save() {
     if (!form.description.trim()) return;
     const id = form.id || `t_${Date.now()}`;
-    const payload = { ...form, id, department: "Teknik", createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
+    const prevTask = form.id ? state.tasks.find((t) => t.id === id) : null;
+    let payload = stampStatusTiming(prevTask?.status, { ...form, id, department: "Teknik", createdAt: form.createdAt || new Date().toISOString(), createdBy: form.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser });
+    // Kullanıcı teyidiyle: "tekniğe düşen görevde de yedek malzeme
+    // kullanabilir" — stok düşümü SADECE bir kez uygulanır (materialsConsumed
+    // bayrağı), aynı kaydı tekrar düzenleyip kaydetmek stoğu ikinci kez
+    // düşürmez.
+    const shouldConsume = (payload.materialsUsed || []).length > 0 && !prevTask?.materialsConsumed;
+    if (shouldConsume) payload = { ...payload, materialsConsumed: true };
     const tasks = form.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
-    updateState({ tasks });
+    const stockPatch = shouldConsume ? consumeStockPatch(state, payload.materialsUsed, payload, currentUser) : {};
+    updateState({ tasks, ...stockPatch });
     setFormOpen(false);
   }
   function remove(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
@@ -71,9 +83,6 @@ export function Teknik({ state, updateState, currentUser, role, deepLink, onCons
   // kısayolundan gelinir) üst sekme şeridi tamamen gizlenir; Bakım Takvimi/
   // Planlı Bakımlar/Arıza Kayıtları zaten hiçbir kısayoldan hedeflenmiyor,
   // o yüzden bu şerit olmadan erişilemezler.
-  function saveMobileTask(updated) {
-    updateState({ tasks: state.tasks.map((t) => (t.id === updated.id ? updated : t)) });
-  }
 
   return (
     <div>
@@ -92,13 +101,17 @@ export function Teknik({ state, updateState, currentUser, role, deepLink, onCons
         </div>
       )}
 
-      {/* Mobilde admin/tanım ağırlıklı sekmeler (Bakım Takvimi/Planlı
-          Bakımlar/Arıza Kayıtları/Sayaç Okuma) şeritte YOK — bilerek, "mobil =
-          saha" ilkesiyle (bkz. mobil-ops-ui SKILL.md). Sadece sahanın gerçekten
-          kullandığı iki ekran arasında geçiş: Mahal Kontrol ve Görevler. */}
+      {/* Mobilde admin/tanım ağırlıklı sekmeler (Planlı Bakımlar/Arıza
+          Kayıtları/Sayaç Okuma) şeritte YOK — bilerek, "mobil = saha"
+          ilkesiyle (bkz. mobil-ops-ui SKILL.md). Kullanıcı teyidiyle: "Bakım
+          takvimi tekniğin ekranına getirilebilsin" — mobilde artık AYRI bir
+          NavDrawer ekranı değil, Teknik'in kendi şeridinde üçüncü sekme
+          (bkz. MobileApp.jsx handleNavSelect "bakimtakvimi" deepLink'i, ve
+          altta bu sekmenin mobilde masaüstü Bakim.jsx yerine dokunmatik
+          MaintenanceScreen'i render etmesi). */}
       {mobileMode && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "gorevler", label: "Görevler" }].map((tb) => (
+          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "gorevler", label: "Görevler" }, { key: "takvim", label: "Bakım Takvimi" }].map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}
               style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
                 background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>
@@ -108,9 +121,20 @@ export function Teknik({ state, updateState, currentUser, role, deepLink, onCons
         </div>
       )}
 
-      {tab === "takvim" && <Bakim state={state} updateState={updateState} currentUser={currentUser} role={role} canWrite={canWrite} />}
+      {tab === "takvim" && (mobileMode
+        ? <MaintenanceScreen state={state} updateState={updateState} currentUser={currentUserObj} role={role} canWrite={canWrite} />
+        : <Bakim state={state} updateState={updateState} currentUser={currentUser} role={role} canWrite={canWrite} />
+      )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />}
+      {/* Kullanıcı teyidiyle: "aynı yapıyı teknik ve güvenliğede istiyorum"
+          — Temizlik'teki kat akordionu (bkz. mobile/grid/MahalGridScreen.jsx)
+          artık Teknik'in mobil Mahal Kontrol sekmesinde de; masaüstü hâlâ
+          eski admin/tanım ağırlıklı MahalKontrol.jsx'i kullanıyor. */}
+      {tab === "mahal" && (
+        mobileMode
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" canWrite={canWrite} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />
+      )}
 
       {tab === "planli" && (
         <div>
@@ -128,16 +152,13 @@ export function Teknik({ state, updateState, currentUser, role, deepLink, onCons
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <div>
-            <PageHeader title="Görevler" subtitle={`${genel.length} kayıt`} />
-            <MobileTaskList tasks={genel} onSaveTask={saveMobileTask} emptyText="Kayıt yok." />
-          </div>
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" tasks={genel} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${genel.length} kayıt — Teknik departmanının genel işleri`}
               right={canWrite && <Button icon={Plus} onClick={startNew}>Yeni Görev</Button>} />
             {formOpen && canWrite && (
-              <TaskForm form={form} setForm={setForm} lockDepartment="Teknik" types={state.taskTypes} team={state.team} onSave={save} onCancel={() => setFormOpen(false)} />
+              <TaskForm form={form} setForm={setForm} lockDepartment="Teknik" types={state.taskTypes} team={state.team} stockItems={state.stockItems} stockCategories={state.stockCategories} onSave={save} onCancel={() => setFormOpen(false)} />
             )}
             <TaskList tasks={genel} onEdit={startEdit} onDelete={remove} showDept={false} emptyText="Kayıt yok." canWrite={canWrite} />
           </div>

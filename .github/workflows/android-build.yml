@@ -1,0 +1,63 @@
+name: Android APK Build
+
+# Kullanıcı teyidiyle: "android kısmında yap" — bu makinede JDK/Android SDK
+# kurulu değil (bkz. `which java`/`ANDROID_HOME` boş), yerelde .apk
+# üretilemiyor. GitHub-hosted runner'da (ubuntu-latest) JDK zaten var,
+# Android SDK burada kuruluyor — .apk her push'ta OTOMATİK üretilip sabit
+# bir "android-latest" release'e eklenir. Ayarlar'daki indirme linki
+# (bkz. src/pages/Ayarlar.jsx) bu release'in APK varlığına işaret eder —
+# link her zaman aynı kalır, içeriği her build'de güncellenir.
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "android/**"
+      - "capacitor.config.json"
+      - "package.json"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets + sync Capacitor
+        run: npx vite build && npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk park-plaza-saha.apk
+
+      # "android-latest" — sabit tag, her başarılı build'de aynı release'in
+      # üzerine yazılır (kullanıcı teyidiyle: "ayarların içine link koy" —
+      # linkin build'den build'e DEĞİŞMEMESİ gerekiyor).
+      - name: Publish/update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: "Android (otomatik build)"
+          body: "Bu APK her koda push'ta otomatik olarak yeniden derlenir — commit ${{ github.sha }}"
+          files: park-plaza-saha.apk

@@ -8,6 +8,8 @@ import { openMailto } from "../lib/mailto.js";
 import { showToast } from "../lib/toast.js";
 import { PrintHeader, FindingsPage } from "../components/PrintDocument.jsx";
 import { buildFindings } from "../lib/findings.js";
+import { taskDurationMinutes } from "../lib/taskTiming.js";
+import { taskHasAssignee } from "../lib/taskAssignees.js";
 
 const REPORTS = [
   { key: "gunluk", label: "Günlük Operasyon Raporu", desc: "Bugünkü tüm görev, kontrol ve olay özeti" },
@@ -25,6 +27,19 @@ const REPORTS = [
   { key: "teknik_gunluk", label: "Teknik Günlük Rapor", desc: "Bugün tamamlanan Teknik iş ve mahal kontrolleri — şefe gönderilebilir" },
   { key: "guvenlik_gunluk", label: "Güvenlik Günlük Rapor", desc: "Bugün tamamlanan Güvenlik iş ve devriyeler — şefe gönderilebilir" },
   { key: "temizlik_gunluk", label: "Temizlik Günlük Rapor", desc: "Bugün tamamlanan Temizlik iş ve mahal kontrolleri — sorumluya gönderilebilir" },
+  // Kullanıcı teyidiyle: "rapor ekranına personel performans analizi koy
+  // departmana göre özel olacak ve hangi personel kaç iş almış kaç dakika
+  // yapmış onu ölçeceğiz" — diğer departman raporlarıyla AYNI desen (ayrı
+  // bir departman seçici değil, her departman kendi rapor satırı).
+  // Kullanıcı teyidiyle: "mahal kontrol formlarında teknik için günlük
+  // haftalık bir raporda aylık olanları ayrı ayrı raporlaç" — periyodu farklı
+  // ritimde olan kontroller (günlük/haftalık saha rutini vs. aylık kat bazlı
+  // denetim) artık tek "Teknik Rapor"un içinde karışmıyor, iki ayrı rapor.
+  { key: "teknik_mahal_gh", label: "Teknik Mahal Kontrol — Günlük/Haftalık", desc: "Son 30 gün, sadece Günlük ve Haftalık periyotlu kontroller" },
+  { key: "teknik_mahal_aylik", label: "Teknik Mahal Kontrol — Aylık", desc: "Son 30 gün, sadece Aylık periyotlu kontroller (yangın tüpü, exit armatürü vb.)" },
+  { key: "teknik_performans", label: "Teknik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
+  { key: "guvenlik_performans", label: "Güvenlik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
+  { key: "temizlik_performans", label: "Temizlik Personel Performansı", desc: "Personel bazlı tamamlanan iş sayısı ve çalışma süresi" },
 ];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -204,11 +219,84 @@ function buildDepartmanGunlukRapor(state, department) {
   };
 }
 
+// Kullanıcı teyidiyle: "mahal kontrol formlarında teknik için günlük
+// haftalık bir raporda aylık olanları ayrı ayrı raporlaç" — Teknik'in
+// tamamlanan mahal kontrol kayıtları, noktanın period alanına göre (bkz.
+// mockData.js MAHAL_PERIODS) filtrelenip iki ayrı raporda gösterilir; tek
+// "Teknik Rapor"daki gibi kümülatif değil, departman günlük raporuyla AYNI
+// "son 30 gün" penceresi.
+function buildTeknikMahalPeriodRapor(state, periods, title, desc) {
+  const since = daysAgoStr(29);
+  const pointById = new Map((state.mahalPoints || []).map((p) => [p.id, p]));
+  const runs = (state.mahalRuns || []).filter((r) => {
+    if (r.department !== "Teknik" || r.status !== "Tamamlandı") return false;
+    if ((r.completedAt || "").slice(0, 10) < since) return false;
+    const point = pointById.get(r.pointId);
+    return point && periods.includes(point.period);
+  }).sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""));
+  const failed = runs.filter((r) => (r.failedQuestions || []).length > 0);
+  return {
+    title, subtitle: `${desc} — ${trDate(since)} – ${trDate(todayStr())}`, department: "Teknik",
+    stats: [
+      { label: "Tamamlanan Kontrol", value: runs.length },
+      { label: "Uygunsuzluk Tespit Edilen", value: failed.length },
+    ],
+    tables: [
+      { title: "Tamamlanan Kontroller", columns: ["Tarih", "Mahal", "Periyot", "Kontrol Eden", "Sonuç"],
+        rows: runs.map((r) => {
+          const point = pointById.get(r.pointId);
+          const location = point?.locations?.find((l) => l.key === r.locationKey);
+          const mahal = location?.label ? `${point?.name || ""} — ${location.label}` : (point?.name || r.pointId);
+          return [trDate((r.completedAt || "").slice(0, 10)), mahal, point?.period || "—", r.completedBy || "—", (r.failedQuestions || []).length > 0 ? `${r.failedQuestions.length} uygunsuzluk` : "Uygun"];
+        }) },
+    ],
+    findings: buildFindings(state, runs),
+  };
+}
+
+// Kullanıcı teyidiyle: "hangi personel kaç iş almış kaç dakika yapmış onu
+// ölçeceğiz" — "iş almış" = tamamlanmış görev sayısı (üstlenip bitirdiği,
+// sadece atanmış-ama-açık olanlar değil), "kaç dakika" = taskDurationMinutes
+// (bkz. lib/taskTiming.js — startedAt/createdAt'ten completedAt'e kadar,
+// yeni "İşi Başlat"/"İşi Bitir" akışının damgaladığı GERÇEK süre). Süresi
+// hesaplanamayan (ör. hem startedAt hem createdAt eksik eski kayıt) işler
+// sayıya dahil ama süre toplamına dahil edilmez — uydurma dakika yok.
+function buildPersonelPerformansRapor(state, department) {
+  const people = (state.team || []).filter((p) => p.department === department && !p.archived);
+  const rows = people.map((p) => {
+    const done = (state.tasks || []).filter((t) => !t.archived && taskHasAssignee(t, p.name) && t.status === "Tamamlandı");
+    const durations = done.map(taskDurationMinutes).filter((d) => d != null);
+    const totalMin = durations.reduce((a, b) => a + b, 0);
+    const avgMin = durations.length > 0 ? Math.round(totalMin / durations.length) : null;
+    return { name: p.name, role: p.role, doneCount: done.length, totalMin, avgMin, timedCount: durations.length };
+  }).sort((a, b) => b.doneCount - a.doneCount);
+  const totalDone = rows.reduce((a, r) => a + r.doneCount, 0);
+  const totalMinAll = rows.reduce((a, r) => a + r.totalMin, 0);
+  return {
+    title: `${department} Personel Performans Analizi`, subtitle: trDate(todayStr()), department,
+    stats: [
+      { label: "Personel Sayısı", value: people.length },
+      { label: "Toplam Tamamlanan İş", value: totalDone },
+      { label: "Toplam Çalışma Süresi", value: `${totalMinAll} dk` },
+    ],
+    tables: [
+      { title: "Personel Bazlı Performans", columns: ["Personel", "Görev", "Tamamlanan İş", "Toplam Süre (dk)", "Ortalama Süre (dk)"],
+        rows: rows.map((r) => [r.name, r.role, r.doneCount, r.timedCount > 0 ? r.totalMin : "—", r.avgMin ?? "—"]) },
+    ],
+    findings: [],
+  };
+}
+
 const BUILDERS = {
   gunluk: buildGunlukRapor, haftalik: buildHaftalikRapor, teknik: buildTeknikRapor, guvenlik: buildGuvenlikRapor, enerji: buildEnerjiRapor, risk: buildRiskRapor,
   teknik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Teknik"),
+  teknik_mahal_gh: (state) => buildTeknikMahalPeriodRapor(state, ["Günlük", "Haftalık"], "Teknik Mahal Kontrol — Günlük/Haftalık", "Son 30 gün"),
+  teknik_mahal_aylik: (state) => buildTeknikMahalPeriodRapor(state, ["Aylık"], "Teknik Mahal Kontrol — Aylık", "Son 30 gün"),
   guvenlik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Güvenlik"),
   temizlik_gunluk: (state) => buildDepartmanGunlukRapor(state, "Temizlik"),
+  teknik_performans: (state) => buildPersonelPerformansRapor(state, "Teknik"),
+  guvenlik_performans: (state) => buildPersonelPerformansRapor(state, "Güvenlik"),
+  temizlik_performans: (state) => buildPersonelPerformansRapor(state, "Temizlik"),
 };
 
 function ReportPage({ report, branding, logoUrl, printDate }) {

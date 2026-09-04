@@ -4,25 +4,51 @@ import { PRIORITY_COLOR, STATUS_COLOR, initials, actionLabel, placeOf } from "..
 // Sözleşme (bkz. mobile-ops-ui SKILL.md): anatomi sırası sabit —
 // 1) avatar 2) başlık 3) öncelik satırı 4) mahal yolu 5) durum 6) ekip + aksiyon.
 // Dokunma → DetailScreen (bkz. TaskListScreen.jsx) — Faz 4.
+// Kullanıcı teyidiyle: "personelin üzerindeki işler sıralandığında kırmızı
+// olsun bittiğinde yeşil arka plan olsun" — task.status'a göre otomatik
+// (çağıran taraf bir şey değiştirmeden, RecordCard kullanılan HER liste bu
+// rengi alır): açık/devam eden kırmızımsı, Tamamlandı yeşilimsi, İptal
+// nötr (görsel olarak "iş" gibi değil, arşiv gibi kalsın).
+function bgForStatus(status) {
+  if (status === "Tamamlandı") return "rgba(78,138,70,0.10)";
+  if (status === "İptal") return t.surface;
+  return t.kiremitSoft;
+}
+
 export function RecordCard({ task, onOpen }) {
   const priorityColor = PRIORITY_COLOR[task.priority] || t.muted;
   const statusColor = STATUS_COLOR[task.status] || t.muted;
   const action = actionLabel(task);
   const place = placeOf(task);
+  // Kullanıcı teyidiyle: "iş emirlerine birden fazla personel de
+  // seçilebilsin" — birden fazla atanan varsa avatarın üstünde küçük bir
+  // "+N" rozeti (ilk kişinin baş harfleri zaten görünüyor, kaç kişi daha
+  // olduğu da görünür olsun).
+  const extraCount = Array.isArray(task.assignees) && task.assignees.length > 1 ? task.assignees.length - 1 : 0;
 
   return (
     <button
       onClick={() => onOpen(task)}
       style={{
         all: "unset", boxSizing: "border-box", cursor: "pointer", display: "flex", gap: 10, width: "100%",
-        padding: "12px 16px", borderBottom: `1px solid ${t.hairline}`, background: t.surface,
+        padding: "12px 16px", borderBottom: `1px solid ${t.hairline}`, background: bgForStatus(task.status),
       }}
     >
-      <div style={{
-        width: 34, height: 34, borderRadius: "50%", background: t.pineSoft, color: t.pine, fontSize: 12, fontWeight: 700,
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2,
-      }}>
-        {initials(task.assignee)}
+      <div style={{ position: "relative", flexShrink: 0, marginTop: 2 }}>
+        <div style={{
+          width: 34, height: 34, borderRadius: "50%", background: t.pineSoft, color: t.pine, fontSize: 12, fontWeight: 700,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {initials(task.assignees?.[0] || task.assignee)}
+        </div>
+        {extraCount > 0 && (
+          <span style={{
+            position: "absolute", bottom: -3, right: -3, minWidth: 16, height: 16, borderRadius: 8, padding: "0 3px",
+            background: t.pine, color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${t.surface}`,
+          }}>
+            +{extraCount}
+          </span>
+        )}
       </div>
       <div style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
         <p style={{

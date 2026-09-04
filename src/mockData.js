@@ -69,9 +69,9 @@ export const MAINTENANCE_FIRMS = ["Otis", "Trak", "Hertz Jeneratör", "Schneider
 // departman liderlerine Kontroller/Raporlar/KPI gibi yönetimsel ekranlar da
 // varsayılan olarak açık; Yönetim departmanı (Facility Manager + Yönetim
 // Personeli) tüm ekranlara erişir.
-const ALL_SCREENS = ["dashboard", "operasyonlar", "katplani", "varliklar", "bakim", "kontroller", "guvenlik", "temizlik", "enerji", "riskler", "dokumanlar", "raporlar", "kpi", "yonetim", "ayarlar", "mobiltasarim"];
+const ALL_SCREENS = ["dashboard", "operasyonlar", "katplani", "varliklar", "stok", "bakim", "kontroller", "guvenlik", "temizlik", "enerji", "riskler", "dokumanlar", "raporlar", "kpi", "yonetim", "ayarlar", "mobiltasarim"];
 const DEPARTMENT_DEFAULT_SCREENS = {
-  "Teknik": ["dashboard", "operasyonlar", "katplani", "varliklar", "bakim", "enerji", "riskler", "dokumanlar"],
+  "Teknik": ["dashboard", "operasyonlar", "katplani", "varliklar", "stok", "bakim", "enerji", "riskler", "dokumanlar"],
   "Güvenlik": ["dashboard", "operasyonlar", "katplani", "guvenlik", "dokumanlar"],
   "Temizlik": ["dashboard", "operasyonlar", "katplani", "temizlik", "dokumanlar"],
   "İSG": ["dashboard", "operasyonlar", "katplani", "riskler", "dokumanlar", "raporlar"],
@@ -160,11 +160,23 @@ export const TEAM = RAW_TEAM;
 // Kullanıcı (giriş hesabı) kaydı — bir personele (personnelId) bağlı, ayrı
 // username/password/mobileAccess/permissions taşır. Seed'deki her personelin
 // zaten bir hesabı var (mevcut davranışla birebir aynı — hepsi tam yetkiliydi).
+// Güvenlik notu: bu obje BİLEREK bir `password` alanı taşımıyor. Gerçek
+// giriş her zaman Firebase Authentication üzerinden (bkz. firebase.js
+// login() → signInWithEmailAndPassword) — burada tutulan herhangi bir şifre
+// metni hiçbir zaman doğrulama için OKUNMAZ, sadece ölü ağırlık olurdu. Ve
+// bu obje `users` dizisinin bir parçası olarak TEK paylaşılan Firestore
+// state dokümanına yazılır — o doküman GİRİŞ YAPMIŞ HER istemciye tam
+// olarak indiriliyor (bkz. firebase.js subscribeState, "tüm istemciler
+// state dokümanını her senkronda TAMAMEN indiriyor"). Yani buraya bir şifre
+// metni koymak, en düşük yetkili sahadaki personelin bile tarayıcısında
+// (React state/DevTools) Yönetim'in şifresini görebilmesi anlamına gelirdi
+// — bulunup düzeltilen bir güvenlik açığıydı (bkz. migrateLegacyState'teki
+// geriye dönük temizleme adımı, zaten Firestore'a yazılmış eski kayıtları da
+// temizliyor).
 export const USERS = RAW_TEAM.map((t) => ({
   id: `usr_${t.id}`,
   personnelId: t.id,
   username: t.email,
-  password: DEFAULT_PASSWORD,
   mobileAccess: true,
   permissions: buildPermissions(defaultWebScreens(t)),
 }));
@@ -548,8 +560,7 @@ const TEKNIK_MEKANIK_GUNLUK = [
   },
   {
     id: "mtd2", department: "Teknik", role: "Mekanik", name: "ADP Odası (Jeneratör + Kompanzasyon)", assetId: "PP-092-01", floorLabel: "4B", side: "Beşiktaş",
-    assetDesc: "2x Çukurova jeneratör (620 kVA), ADP panoları, kompanzasyon panosu — her gün kompanzasyon ölçümü (aktif/reaktif güç) alınır", period: "Günlük",
-    compensation: true,
+    assetDesc: "2x Çukurova jeneratör (620 kVA), ADP panoları, kompanzasyon panosu — kompanzasyon ölçümü artık ayrı (bkz. COMPENSATION_PANELS, katın kendi 'Kompanzasyon' hızlı aksiyonu)", period: "Günlük",
     questions: [
       { text: "Jeneratör akü voltajı (V)", type: "sayi", unit: "V", min: 12, max: 14 },
       { text: "Jeneratör yakıt seviyesi yeterli mi (%50 üzeri)?", failOn: "Hayır" },
@@ -560,8 +571,7 @@ const TEKNIK_MEKANIK_GUNLUK = [
   // tarafındaki eşi, kendi kompanzasyon panosuyla (PP-092-02).
   {
     id: "mtd2b", department: "Teknik", role: "Mekanik", name: "ADP Odası (Kompanzasyon) — Sarıyer", assetId: "PP-092-02", floorLabel: "4B", side: "Sarıyer",
-    assetDesc: "ADP Odası'nın Sarıyer tarafı — kompanzasyon panosu (Beşiktaş ADP Odası'nın eşi). Her gün kompanzasyon ölçümü (aktif/reaktif güç) alınır.", period: "Günlük",
-    compensation: true,
+    assetDesc: "ADP Odası'nın Sarıyer tarafı — kompanzasyon panosu (Beşiktaş ADP Odası'nın eşi). Kompanzasyon ölçümü artık ayrı (bkz. COMPENSATION_PANELS, katın kendi 'Kompanzasyon' hızlı aksiyonu).", period: "Günlük",
     questions: [
       { text: "ADP pano arıza/alarm ledi yanıyor mu?", failOn: "Evet" },
     ],
@@ -619,22 +629,30 @@ const YANGIN_POMPASI_TEST_SORULARI = [
   { text: "Test sırasında basınç düşüşü normal aralıkta mı?", failOn: "Hayır" },
   { text: "Jokey pompa normal çalışıyor mu?", failOn: "Hayır" },
 ];
+// Kullanıcı teyidiyle: "haftalık kontrollerde jeneratör test ve yangın
+// pompası testlerde çalışma zorunluluğu koy 10dk teknik olarak kaç dakika
+// ise ona göre yap bu süre dolmadan mahal kontrol formunu kapattırma" —
+// minRunMinutes: FillModal (bkz. MahalKontrol.jsx) run.startedAt'tan bu
+// kadar dakika geçmeden "Kontrolü Tamamla"yı tıklanamaz kılar. 10 dk somut
+// bir örnek olarak verildi, gerçek yük altında çalıştırma süresi teknik
+// ekibin kendi standardına göre (jeneratör ~10 dk, yangın pompası testi de
+// aynı) — burada uydurma bir başka değer kullanılmadı.
 const TEKNIK_MEKANIK_HAFTALIK = [
   {
     id: "mtw1", department: "Teknik", role: "Mekanik", name: "Jeneratör Testi — Zemin", assetId: "PP-004-01", floorLabel: "Zemin",
-    assetDesc: "2x jeneratör (bahçe, kabinli)", period: "Haftalık", questions: JENERATOR_TEST_SORULARI,
+    assetDesc: "2x jeneratör (bahçe, kabinli)", period: "Haftalık", questions: JENERATOR_TEST_SORULARI, minRunMinutes: 10,
   },
   {
     id: "mtw2", department: "Teknik", role: "Mekanik", name: "Jeneratör Testi — 4B", assetId: "PP-002", floorLabel: "4B", side: "Beşiktaş",
-    assetDesc: "2x Çukurova jeneratör (620 kVA)", period: "Haftalık", questions: JENERATOR_TEST_SORULARI,
+    assetDesc: "2x Çukurova jeneratör (620 kVA)", period: "Haftalık", questions: JENERATOR_TEST_SORULARI, minRunMinutes: 10,
   },
   {
     id: "mtw3", department: "Teknik", role: "Mekanik", name: "Yangın Pompası Testi — 3B", assetId: "PP-018", floorLabel: "3B", side: "Sarıyer",
-    assetDesc: "Alt zone yangın pompası + joker pompa", period: "Haftalık", questions: YANGIN_POMPASI_TEST_SORULARI,
+    assetDesc: "Alt zone yangın pompası + joker pompa", period: "Haftalık", questions: YANGIN_POMPASI_TEST_SORULARI, minRunMinutes: 10,
   },
   {
     id: "mtw4", department: "Teknik", role: "Mekanik", name: "Yangın Pompası Testi — Çatı", assetId: "PP-016", floorLabel: "ÇATI1",
-    assetDesc: "Üst zone yangın pompası + joker pompa, yangın deposu", period: "Haftalık", questions: YANGIN_POMPASI_TEST_SORULARI,
+    assetDesc: "Üst zone yangın pompası + joker pompa, yangın deposu", period: "Haftalık", questions: YANGIN_POMPASI_TEST_SORULARI, minRunMinutes: 10,
   },
 ];
 
@@ -915,6 +933,18 @@ export const COMPENSATION_READINGS = [
   { id: "cmp2", date: d(1), activeKw: 114, reactiveKvar: 28, note: "Kondansatör bankı bakımı sonrası", pointId: "mtd2" },
 ];
 
+// Kompanzasyon panoları — kullanıcı teyidiyle: "kompanzasyonlarıda ayrı
+// belirt" (Mahal Kontrol'den ayrı, kendi başına bir kayıt). Eskiden
+// mahalPoints üzerindeki `compensation:true` bayrağıyla ADP Odası'nın günlük
+// checklist'ine gömülüydü (bkz. TEKNIK_MEKANIK_GUNLUK mtd2/mtd2b) — artık
+// checklist'ten bağımsız, katına göre kendi kaydı var. id'ler eski
+// pointId'lerle (mtd2/mtd2b) AYNI bırakıldı ki yukarıdaki COMPENSATION_READINGS
+// geçmişi kopmasın (pointId hâlâ bu id'lere referans veriyor).
+export const COMPENSATION_PANELS = [
+  { id: "mtd2", name: "ADP Odası (Jeneratör + Kompanzasyon)", floorLabel: "4B", side: "Beşiktaş", assetId: "PP-092-01" },
+  { id: "mtd2b", name: "ADP Odası (Kompanzasyon) — Sarıyer", floorLabel: "4B", side: "Sarıyer", assetId: "PP-092-02" },
+];
+
 // Su Okuma — binada birden fazla sayaç var (ör. ana giriş, kule, otopark vb.);
 // her sayaç ayrı tanımlanır (waterMeters, Ayarlar'daki tanım listeleri gibi
 // kullanıcı tarafından genişletilir) ve okumalar meterId ile o sayaca bağlanır.
@@ -929,14 +959,28 @@ export const WATER_READINGS = [
 ];
 
 // Doğalgaz Sayacı — kullanıcı teyidiyle: "Doğalgaz sayacıda ekle" — Su
-// Okuma ile aynı desen (meters + readings, meterId ile ilişki). mahalKey ile
-// Isıtma Odası'nın günlük Mahal Kontrol'üne "gömülü" (bkz. MahalKontrol.jsx
-// resolveMeter) — kontrolü yapan personel checklist'i doldururken sayaç
-// okumasını da girer, buraya (gasReadings) otomatik eklenir.
+// Okuma ile aynı desen (meters + readings, meterId ile ilişki). Eskiden
+// mahalKey ile Isıtma Odası'nın günlük Mahal Kontrol'üne "gömülüydü" —
+// kullanıcı teyidiyle: "teknikte mahal kontrollerden sayaçları çıkar katlara
+// sayaçları ekle" ile artık checklist'ten bağımsız, doğrudan katına (bkz.
+// floorLabel/side) bağlı; okuma mobilde o katın "Sayaç Oku" hızlı aksiyonundan
+// girilir (bkz. MahalGridScreen.jsx).
 export const GAS_METERS = [
-  { id: "gm1", name: "Doğalgaz Ana Sayacı (Kazan Dairesi)", floorLabel: "3B", side: "Sarıyer", room: "Isıtma Odası (Kazan Dairesi, Yangın Pompası, Hidroforlar)", mahalKey: "pt_mtd3" },
+  { id: "gm1", name: "Doğalgaz Ana Sayacı (Kazan Dairesi)", floorLabel: "3B", side: "Sarıyer", room: "Isıtma Odası (Kazan Dairesi, Yangın Pompası, Hidroforlar)", mahalKey: null },
 ];
 export const GAS_READINGS = [];
+
+// Elektrik Sayacı — Su/Doğalgaz Okuma ile AYNI desen (meters + readings,
+// meterId ile ilişki, floorLabel/side ile katına bağlanabilir). Kullanıcı
+// teyidiyle: "su sayaçlarını su işareti ile elektrikleri elektrik işareti ile
+// göster" — bu yüzden su/gaz'dan ayrı bir liste (ikon/tür ayrımı MahalGridScreen
+// ve Enerji.jsx'te type="electric" ile yapılır). Gerçek binada kaç/hangi ayrı
+// elektrik sayacı olduğu elimizde yok — WATER_METERS'daki gibi tek bir "Ana
+// Sayaç" ile başlatıldı, diğerleri Enerji > Elektrik Okuma'dan eklenir.
+export const ELECTRIC_METERS = [
+  { id: "em1", name: "Ana Elektrik Sayacı", floorLabel: null, side: null, room: null, mahalKey: null },
+];
+export const ELECTRIC_READINGS = [];
 
 export const DOCUMENTS = [
   { id: "doc1", name: "Chiller Servis Raporu — Ağustos", type: "PDF", linkedTo: "PP-034-01", uploadedAt: d(3) },
@@ -950,6 +994,39 @@ export const NOTIFICATIONS = [
   { id: "n3", level: "warning", title: "SLA yaklaşıyor", body: "#3103 kaydı SLA süresine 1 saat kaldı.", at: h(1), read: false },
   { id: "n4", level: "info", title: "Kontrol tamamlandı", body: "22. kat kontrolü Ahmet Karayat tarafından tamamlandı.", at: h(1.5), read: true },
 ];
+
+// Stok modülü — kullanıcı teyidiyle: "bakımlarda kullanılan yedek parçalar,
+// planlı bakımlarda ve arıza bakımlarda yedek malzeme kullanılıyor stok
+// modülü kur... stok takip sistemi elektrik mekanik inşaat olacak şekilde
+// altında kırılımlanacak, örneğin mekanik[te] klima santrali malzemesi,
+// elektrik[te] sarf malzeme/aydınlatma/led ampul gibi". TASK_TYPES ile AYNI
+// hiyerarşik desen (id/parentId/order/label/isLeaf — bkz. Ayarlar.jsx
+// recomputeLeaf), tekrar icat edilmedi. Üç ana dal SABİT kök (Elektrik/
+// Mekanik/İnşaat); altındaki kırılım (Klima Santrali, Aydınlatma, Sarf
+// Malzeme...) Stok ekranından serbestçe genişletilir. STOCK_ITEMS kendi
+// kategoriye categoryId ile bağlı ayrı bir liste — kullanıcı teyidiyle
+// "stokları daha sonra ekleriz" BİLEREK boş başlatıldı, sadece yapı hazır.
+// STOCK_MOVEMENTS: hangi görevde ne kadar malzeme tüketildiğinin izi (bkz.
+// lib/stock.js consumeStockPatch) — ayrı bir "hangi bakımda ne kullanıldı"
+// sorgusu icat edilmesin diye tek kaynak.
+export const STOCK_CATEGORIES = [
+  { id: "stc_elektrik", parentId: null, order: 1, label: "Elektrik", isLeaf: true },
+  { id: "stc_mekanik", parentId: null, order: 2, label: "Mekanik", isLeaf: true },
+  { id: "stc_insaat", parentId: null, order: 3, label: "İnşaat", isLeaf: true },
+];
+export const STOCK_ITEMS = [];
+export const STOCK_MOVEMENTS = [];
+
+// Duyurular — kullanıcı teyidiyle: "duyuru ve önerilerin web sayfasında
+// bağlantısını göremiyorum" — Öneriler (suggestions) gibi bu depoda hiç
+// karşılığı yoktu (bkz. navConfig.js eski `kind:"placeholder"`), gerçek bir
+// veri modeli/ekran olarak eklendi (bkz. pages/Duyurular.jsx). Yayınlama
+// (post/sil) Yönetim/Şef-Sorumlu rolleriyle sınırlı (yukarıdan aşağıya
+// duyuru, Öneriler'in aksine — o herkesten yukarı, bu yönetimden aşağı),
+// OKUMA herkese açık (Öneriler ile aynı "screenKey izniyle sınırlı değil"
+// ilkesi, bkz. App.jsx OPEN_SCREENS). Şekil: { id, title, body, pinned,
+// authorName, authorDepartment, createdAt }.
+export const ANNOUNCEMENTS = [];
 
 export function makeInitialState() {
   return {
@@ -969,12 +1046,16 @@ export function makeInitialState() {
     invoiceSettings: { logoUrl: "", bankName: "", iban: "", signerName: "", signerTitle: "", dueDays: 10 },
     companies: [],
     taskTypes: TASK_TYPES,
+    stockCategories: STOCK_CATEGORIES,
+    stockItems: STOCK_ITEMS,
+    stockMovements: STOCK_MOVEMENTS,
     // Faz 9 — Öneriler modülü (bkz. faz-6-11-prompt.md). Bu depoda hiç
     // karşılığı yoktu, yeni bir alan. Şekil: { id, title, description,
     // category, photoUrl, anonymous, authorName, authorDepartment, status,
     // createdAt, supporters:[isim], comments:[{author,text,at}],
     // statusReason, statusChangedBy, statusChangedAt, convertedTaskId }.
     suggestions: [],
+    announcements: ANNOUNCEMENTS,
     // Ana Sayfa'nın (mobil) bölüm sırası/görünürlüğü, departman bazlı —
     // kullanıcı teyidiyle: "sürükle bırak ile ekranı dizayn edebilir miyim"
     // (Ayarlar > Mobil Tasarım). { [departman]: { order: [sectionKey...],
@@ -996,10 +1077,13 @@ export function makeInitialState() {
     energyDaily: ENERGY_DAILY,
     energySummary: ENERGY_SUMMARY,
     compensationReadings: COMPENSATION_READINGS,
+    compensationPanels: COMPENSATION_PANELS,
     waterMeters: WATER_METERS,
     waterReadings: WATER_READINGS,
     gasMeters: GAS_METERS,
     gasReadings: GAS_READINGS,
+    electricMeters: ELECTRIC_METERS,
+    electricReadings: ELECTRIC_READINGS,
     documents: DOCUMENTS,
     notifications: NOTIFICATIONS,
   };
@@ -1024,7 +1108,6 @@ export function migrateLegacyState(state) {
       id: `usr_${t.id}`,
       personnelId: t.id,
       username: t.username || t.email,
-      password: t.password || DEFAULT_PASSWORD,
       mobileAccess: t.mobileAccess !== false,
       permissions: buildPermissions(t.webScreens && t.webScreens.length > 0 ? t.webScreens : defaultWebScreens(t)),
     }));
@@ -1081,7 +1164,53 @@ export function migrateLegacyState(state) {
       })),
     };
   }
+  // Güvenlik düzeltmesi: `users[].password` daha önce yazılmış GERÇEK
+  // Firestore kayıtlarında hâlâ duruyor olabilir (bkz. USERS/yukarıdaki
+  // migrasyon artık bu alanı hiç yazmıyor) — bu alan tüm giriş yapmış
+  // istemcilere indirilen paylaşılan state dokümanının bir parçası
+  // olduğundan (bkz. firebase.js subscribeState), varlığının kendisi bir
+  // açık — gerçek giriş zaten Firebase Authentication'dan geçiyor, bu metin
+  // hiç okunmuyordu. Burada tek seferlik, kendi kendini onaran bir temizlik:
+  // herhangi bir kullanıcıda hâlâ varsa tüm dizi password'süz olarak geri
+  // yazılır (App.jsx'teki referans-eşitsizliği kontrolü bunu otomatik
+  // Firestore'a persist eder).
+  if (Array.isArray(next.users) && next.users.some((u) => "password" in u)) {
+    next = { ...next, users: next.users.map((u) => { const { password, ...rest } = u; return rest; }) };
+  }
   if (!next.mobileLayout || typeof next.mobileLayout !== "object") next = { ...next, mobileLayout: {} };
+  // Kullanıcı teyidiyle: "teknikte mahal kontrollerden sayaçları çıkar
+  // katlara sayaçları ekle... kompanzasyonlarıda ayrı belirt" — yeni üst
+  // seviye alanlar, önceden kaydedilmiş Firestore dokümanlarında yok.
+  if (!Array.isArray(next.electricMeters)) next = { ...next, electricMeters: ELECTRIC_METERS };
+  if (!Array.isArray(next.electricReadings)) next = { ...next, electricReadings: ELECTRIC_READINGS };
+  if (!Array.isArray(next.compensationPanels)) next = { ...next, compensationPanels: COMPENSATION_PANELS };
+  // Kullanıcı teyidiyle: "duyuru... web sayfasında bağlantısını göremiyorum"
+  // — önceden hiç karşılığı olmayan yeni bir üst seviye alan.
+  if (!Array.isArray(next.announcements)) next = { ...next, announcements: ANNOUNCEMENTS };
+  // Kullanıcı teyidiyle: "stok modülü kur" — önceden hiç karşılığı olmayan
+  // yeni üst seviye alanlar.
+  if (!Array.isArray(next.stockCategories)) next = { ...next, stockCategories: STOCK_CATEGORIES };
+  if (!Array.isArray(next.stockItems)) next = { ...next, stockItems: STOCK_ITEMS };
+  if (!Array.isArray(next.stockMovements)) next = { ...next, stockMovements: STOCK_MOVEMENTS };
+  // "stok" ekranı ALL_SCREENS'e yeni eklendi — var olan hesapların
+  // permissions'ı bu ekran hiç yokken oluşturulmuştu, geriye dönük
+  // eklenmezse kimse Sidebar'da göremez. Diğer 33 kişilik seed'in ilk
+  // açılışta aldığı "tam erişim" varsayımıyla AYNI (bkz. buildPermissions
+  // allWrite=true notu) — admin isterse sonra Yetkileri Düzenle'den daraltır.
+  if (Array.isArray(next.users) && next.users.some((u) => !u.permissions?.stok)) {
+    next = { ...next, users: next.users.map((u) => (u.permissions?.stok ? u : { ...u, permissions: { ...u.permissions, stok: { view: true, read: true, write: true } } })) };
+  }
+  // Daha önce kaydedilmiş bir doğalgaz sayacı (gm1) hâlâ eski mahalKey
+  // ("pt_mtd3") ile Isıtma Odası'nın günlük checklist'ine gömülü olabilir —
+  // artık bağımsız/katına bağlı olması gerektiğinden tek seferlik temizlenir.
+  if (Array.isArray(next.gasMeters) && next.gasMeters.some((m) => m.mahalKey)) {
+    next = { ...next, gasMeters: next.gasMeters.map((m) => (m.mahalKey ? { ...m, mahalKey: null } : m)) };
+  }
+  // Aynı şekilde ADP Odası noktalarındaki eski `compensation:true` bayrağı —
+  // artık kompanzasyon COMPENSATION_PANELS üzerinden, checklist'ten bağımsız.
+  if (Array.isArray(next.mahalPoints) && next.mahalPoints.some((p) => p.compensation)) {
+    next = { ...next, mahalPoints: next.mahalPoints.map((p) => (p.compensation ? { ...p, compensation: false } : p)) };
+  }
   // Güvenlik Devriyesi'nin vardiya (gündüz/gece) saatleri — kullanıcı
   // teyidiyle: "Güvenlik Devriyesi Hergün Belirli Saatlerde tekrar edecek...
   // devriye saatleri değiştirilebilir". Daha önce kaydedilmiş Firestore

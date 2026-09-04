@@ -1,8 +1,9 @@
 import {
   Home, Clock, Wrench, ClipboardList, Sparkles, ShieldCheck,
-  Megaphone, Lightbulb, CalendarDays, BarChart3,
+  Megaphone, Lightbulb, BarChart3,
   Settings2, Users, LogOut,
 } from "lucide-react";
+import { taskHasAssignee } from "../../lib/taskAssignees.js";
 
 // Gerçek `state.tasks` alanları (bkz. src/mockData.js, src/components/TaskForm.jsx)
 // — mobil-ui-prompt.md'nin varsaydığı `stpu_records_v2` / durum-öncelik
@@ -19,17 +20,23 @@ function isOpenTask(t) {
 // kararı") kapsam filtresi TEK yerde tanımlı: hem rozet sayımı (aşağıda)
 // hem ListScreen'in gösterdiği liste (bkz. MobileApp.jsx) AYNI filtreyi
 // kullanır — ikisi arasında sessizce sapma riski olmaz.
+// Kullanıcı teyidiyle: "Talep yönetimindeki planlı bakımları kaldır" —
+// "gorevler" (Planlı Bakım) kapsamı tamamen kaldırıldı (o iş zaten Teknik >
+// Bakım Takvimi'nde var, burada tekrar filtre olarak durmasına gerek yoktu).
+// "kiracılar yerine talep şikayetler yap" — "Kiracı talepleri" adı, gerçekte
+// içeriğin ne olduğunu (firma kaynaklı VEYA mahal üzerinden açılan talep/
+// şikayet, sadece kiracıya özel değil) daha doğru yansıtan "Talep
+// Şikayetleri"ne çevrildi — filtre mantığı DEĞİŞMEDİ.
 export const OPERASYONLAR_SCOPES = {
   operasyonlar: { title: "Talep yönetimi", filter: null },
-  gorevler: { title: "Görevler", filter: (t) => t.category === "Planlı Bakım" },
-  kiracitalepleri: { title: "Kiracı talepleri", filter: (t) => !!t.company || t.viaMahal },
+  kiracitalepleri: { title: "Talep Şikayetleri", filter: (t) => !!t.company || t.viaMahal },
 };
 
 // Bir menü satırının rozetini hesaplar: SADECE bana atanan açık kayıt sayısı
 // (mobil-ui-prompt 6.1.1 "Rozet kuralları" — modüldeki toplam kayıt değil).
 // extraFilter modüle özel kapsamı daraltır (department, category, kiracı...).
 export function countAssignedOpen(tasks, userName, extraFilter) {
-  const mine = (tasks || []).filter((t) => isOpenTask(t) && t.assignee === userName && (!extraFilter || extraFilter(t)));
+  const mine = (tasks || []).filter((t) => isOpenTask(t) && taskHasAssignee(t, userName) && (!extraFilter || extraFilter(t)));
   return { count: mine.length, urgent: mine.some((t) => t.priority === URGENT_PRIORITY) };
 }
 
@@ -76,12 +83,12 @@ export const ARACLAR_ITEMS = [
     key: "bakim", label: "Teknik bakım", icon: Wrench, screenKey: "bakim",
     badge: (ctx) => countAssignedOpen(ctx.tasks, ctx.userName, (t) => t.department === "Teknik"),
   },
-  // Faz 8 — kendi ekranı var (MaintenanceScreen, takvim+refakat), ama
-  // görünürlüğü "Teknik bakım" ile AYNI izne bağlı (screenKey "bakim") —
-  // MobileApp.jsx renderScreen bu satırı activeNavKey'e bakarak ayrı render
-  // eder, "bakim" screenKey'i sadece izin kontrolü için burada. Teknik
-  // bakım'ın HEMEN altında — ikisi de aynı departmanın aracı.
-  { key: "bakimtakvimi", label: "Bakım takvimi", icon: CalendarDays, screenKey: "bakim" },
+  // Kullanıcı teyidiyle: "Bakım takvimini kaldır. sandiç menüden kaldır." —
+  // eskiden burada ayrı bir "Bakım takvimi" satırı da vardı (Teknik bakım'ın
+  // hemen altında, aynı ekrana — MaintenanceScreen'e — farklı bir sekme
+  // seçili şekilde açılıyordu). Artık kaldırıldı; takvime SADECE Teknik
+  // bakım'ın kendi sekme şeridinden (bkz. Teknik.jsx üç pilli şerit)
+  // ulaşılıyor, menüde tekrar eden bir giriş yok.
   {
     key: "temizlik", label: "Temizlik", icon: Sparkles, screenKey: "temizlik",
     badge: (ctx) => countAssignedOpen(ctx.tasks, ctx.userName, (t) => t.department === "Temizlik"),
@@ -97,7 +104,9 @@ export const ARACLAR_ITEMS = [
   // kapsıyor (izin zaten sadece şef/sorumlu rollere açık, mockData.js
   // LEAD_EXTRA_SCREENS) — departman grupları BİTTİKTEN sonra durur.
   { key: "kontroller", label: "Kontroller", icon: ClipboardList, screenKey: "kontroller" },
-  { key: "duyurular", label: "Duyurular", icon: Megaphone, kind: "placeholder" },
+  // Kullanıcı teyidiyle: "duyuru... web sayfasında bağlantısını göremiyorum"
+  // — artık gerçek ekran (bkz. pages/Duyurular.jsx), eski placeholder değil.
+  { key: "duyurular", label: "Duyurular", icon: Megaphone, kind: "screen" },
   // Faz 9 — gerçek ekran (Personel'le aynı desen: screenKey yok, herkese
   // açık — spec'in rol tablosunda da her rolde geçiyor).
   { key: "oneriler", label: "Öneriler", icon: Lightbulb, kind: "screen" },

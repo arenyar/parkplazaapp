@@ -1,4 +1,5 @@
 import { mobileTokens as t } from "./tokens.js";
+import { taskIsUnassigned } from "../lib/taskAssignees.js";
 
 // Gerçek enum'lar (bkz. src/components/TaskForm.jsx TASK_PRIORITIES/TASK_STATUSES)
 // — spec'in varsaydığı isimler değil. RecordCard VE DetailScreen aynı
@@ -15,7 +16,7 @@ export function initials(name) {
 // "Tamamlandı".
 export function actionLabel(task) {
   if (task.status === "Tamamlandı") return "Tamamlandı";
-  if (!task.assignee) return "Atanmadı";
+  if (taskIsUnassigned(task)) return "Atanmadı";
   return "Devam ediyor";
 }
 

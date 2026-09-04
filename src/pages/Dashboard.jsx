@@ -6,6 +6,8 @@ import { computeAlerts } from "../lib/alerts.js";
 import { buildingStatusList, overallStatus } from "../lib/buildingStatus.js";
 import { isOverdue } from "../lib/sla.js";
 import { hasNonConformity } from "./MahalKontrol.jsx";
+import { openTasksByCategory } from "../mobile/personnel/personStats.js";
+import { PersonnelWorkBoard } from "../components/PersonnelWorkBoard.jsx";
 
 const LEVEL_META = {
   normal: { label: "Normal", color: STATUS.normal.color },
@@ -77,7 +79,24 @@ const DEPT_SHORTCUTS = {
 // erişim sağlıyor, Ana Sayfa'da tekrar göstermeye gerek yok). sectionNodes
 // içindeki `gorevler` düğümü BİLEREK silinmedi — aşağıdaki masaüstü/rol-dışı
 // sabit grid (DEPT_SHORTCUTS'ta karşılığı olmayan roller) hâlâ kullanıyor.
-export const DEFAULT_SECTION_ORDER = ["ozet", "kisayollar", "mahallerDurum", "dikkat", "canliAkis", "binaGenel", "oncelikler", "hizliIslemler", "binaDurumu", "bugun"];
+// Kullanıcı teyidiyle: "Durum Ekranında bölümler olsun: 1 İşlerim 2 Havuzda
+// Bekleyen işler 3 Mahal Kontrol" — 3.'sü zaten var olan "mahallerDurum"
+// bölümüyle karşılanıyor (aynı içerik, yeniden yazılmadı); yeni olan ikisi
+// "islerim" (bana atanmış açık işler) ve "havuzdaBekleyen" (departmanda
+// kimseye atanmamış, havuzda bekleyen açık işler) — ikisi de
+// personStats.js'teki openTasksByCategory ile AYNI kaynaktan (PersonCard.jsx
+// "Açık işler" sekmesiyle birebir aynı kategorizasyon, iki ayrı hesaplama
+// yok). "ana ekranda tüm bölümler gizli filtre olsun" — üçü de diğerleri
+// gibi Mobil Tasarım > Ana Sayfa Düzeni'nden aç/kapa + sürüklenebilir.
+// Kullanıcı teyidiyle: "Mobil Yönetici anasayfasında personellerin listesi
+// gelsin departman bazlı olacak akordion" — "personel" bölümü SADECE
+// Yönetim/departman liderleri için anlamlı olduğundan (bkz.
+// PersonnelAccordion.jsx kendi rol kontrolü) her rolün varsayılan
+// sırasında/gizli listesinde DEĞİL — onOpenPerson prop'u verildiğinde
+// (mobil) sectionNodes.personel zaten null dönebiliyor, gereksiz boş kart
+// basılmasın diye visible filtresi ayrıca `sectionNodes[k]` doluluğuna
+// bakıyor (bkz. aşağıdaki `order.filter`).
+export const DEFAULT_SECTION_ORDER = ["ozet", "kisayollar", "personel", "islerim", "havuzdaBekleyen", "mahallerDurum", "dikkat", "canliAkis", "binaGenel", "oncelikler", "hizliIslemler", "binaDurumu", "bugun"];
 export const DEFAULT_HIDDEN_SECTIONS = ["binaDurumu", "bugun"];
 export const SECTION_LABELS = {
   ozet: "Özet (Başlık + İstatistik + İlerleme)",
@@ -85,7 +104,10 @@ export const SECTION_LABELS = {
   bugun: "Bugün",
   dikkat: "Dikkat Edilmesi Gerekenler",
   kisayollar: "Departman Kısayolları",
-  mahallerDurum: "Mahallere Göre Durum",
+  personel: "Personel (Departman Bazlı)",
+  islerim: "İşlerim",
+  havuzdaBekleyen: "Havuzda Bekleyen İşler",
+  mahallerDurum: "Mahallere Göre Durum (Mahal Kontrol)",
   canliAkis: "Canlı Operasyon Akışı",
   binaGenel: "Bina Genel Görünümü",
   oncelikler: "Bugünün Öncelikleri",
@@ -159,7 +181,7 @@ function StatusDot({ level }) {
   return <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.color, display: "inline-block" }} />;
 }
 
-export function Dashboard({ state, role, onGoTo, onNewTask, onScan, onOpenAlert, onShortcut = () => {} }) {
+export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan, onOpenAlert, onShortcut = () => {}, onOpenPerson, onOpenTicket }) {
   const T = useTheme();
   const scopedTasks = (!role || role === "Yönetim" ? state.tasks : state.tasks.filter((t) => t.department === role)).filter((t) => !t.archived);
   const openTasks = scopedTasks.filter((t) => t.status !== "Tamamlandı" && t.status !== "İptal");
@@ -186,6 +208,12 @@ export function Dashboard({ state, role, onGoTo, onNewTask, onScan, onOpenAlert,
   // üzerinden hesaplanıyor (görev "bugün için planlanan" alanı yok, en yakın
   // gerçek karşılık bu).
   const deptMahalPoints = (!role || role === "Yönetim" ? state.mahalPoints : state.mahalPoints.filter((p) => p.department === role)).filter((p) => !p.archived);
+  // "İşlerim" / "Havuzda Bekleyen İşler" bölümleri — PersonCard.jsx'teki
+  // "Açık işler" sekmesiyle AYNI kategorizasyon (bkz. personStats.js
+  // openTasksByCategory), currentUser yoksa (ör. Yönetim'in kendi hesabı
+  // bir personel kaydına bağlı olmayabilir) boş kategori döner, bölüm o
+  // durumda "kayıt yok" gösterir, hata vermez.
+  const taskCategories = currentUser ? openTasksByCategory(state.tasks, currentUser) : { assigned: [], teamOthers: [], pool: [] };
   const pendingArizaCount = openTasks.filter((t) => t.viaMahal || t.category === "Arıza Bakım").length;
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayTasks = scopedTasks.filter((t) => (t.createdAt || "").slice(0, 10) === todayStr);
@@ -277,6 +305,50 @@ export function Dashboard({ state, role, onGoTo, onNewTask, onScan, onOpenAlert,
       </Card>
     ) : null,
     kisayollar: DEPT_SHORTCUTS[role] ? <DeptShortcuts key="kisayollar" role={role} onShortcut={onShortcut} onGoTo={onGoTo} /> : null,
+    personel: <PersonnelWorkBoard key="personel" state={state} role={role} currentUser={currentUser} onOpenPerson={onOpenPerson} onOpenTicket={onOpenTicket} />,
+    // Kullanıcı teyidiyle: "Durum Ekranında bölümler olsun: 1 İşlerim 2
+    // Havuzda Bekleyen işler" — PersonCard.jsx "Açık işler" sekmesindeki AYNI
+    // iki kategori (assigned/pool), burada Ana Sayfa'nın kendi bölümü olarak.
+    islerim: DEPT_SHORTCUTS[role] ? (
+      <Card key="islerim">
+        <CardTitle right={<Button variant="ghost" icon={Plus} onClick={() => onNewTask({ department: role })}>Görev Başlat</Button>}>İşlerim</CardTitle>
+        {taskCategories.assigned.length === 0 && <p style={{ color: T.dim, fontSize: 13 }}>Size atanmış açık iş yok.</p>}
+        {taskCategories.assigned.slice(0, 8).map((t) => {
+          const ps = PRIORITY_STYLES[t.priority] || {};
+          return (
+            <button key={t.id} onClick={() => onOpenAlert({ goTo: "operasyonlar", ref: t })}
+              style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""}</div>
+              </span>
+              <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
+            </button>
+          );
+        })}
+        {taskCategories.assigned.length > 8 && <p style={{ fontSize: 11.5, color: T.dimmer, margin: "8px 0 0" }}>+{taskCategories.assigned.length - 8} tane daha.</p>}
+      </Card>
+    ) : null,
+    havuzdaBekleyen: DEPT_SHORTCUTS[role] ? (
+      <Card key="havuzdaBekleyen">
+        <CardTitle>Havuzda Bekleyen İşler</CardTitle>
+        {taskCategories.pool.length === 0 && <p style={{ color: T.dim, fontSize: 13 }}>Havuzda bekleyen iş yok.</p>}
+        {taskCategories.pool.slice(0, 8).map((t) => {
+          const ps = PRIORITY_STYLES[t.priority] || {};
+          return (
+            <button key={t.id} onClick={() => onOpenAlert({ goTo: "operasyonlar", ref: t })}
+              style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""}</div>
+              </span>
+              <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
+            </button>
+          );
+        })}
+        {taskCategories.pool.length > 8 && <p style={{ fontSize: 11.5, color: T.dimmer, margin: "8px 0 0" }}>+{taskCategories.pool.length - 8} tane daha.</p>}
+      </Card>
+    ) : null,
     // Referans görseldeki "Mahallere göre durum" listesi — gerçek mahal
     // kontrol noktaları + gerçek durumları (bkz. mahalPointStatus).
     mahallerDurum: DEPT_SHORTCUTS[role] && deptMahalPoints.length > 0 ? (

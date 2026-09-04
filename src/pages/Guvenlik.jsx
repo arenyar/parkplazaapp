@@ -1,19 +1,22 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff } from "lucide-react";
+import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff, AlertTriangle } from "lucide-react";
+import { AiEditButton } from "../components/AiEditButton.jsx";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button, Field, Input, Select, TextArea } from "../components/ui.jsx";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
-import { MobileTaskList } from "../components/MobileTaskList.jsx";
+import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScreen.jsx";
 import { SignaturePad } from "../components/SignaturePad.jsx";
 import { fmtDateTime } from "../lib/format.js";
 import { MahalKontrol } from "./MahalKontrol.jsx";
+import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
 import { uploadDataUrl, uploadPhoto } from "../lib/storage.js";
 import { findDeptManager } from "../mockData.js";
 import { openMailto } from "../lib/mailto.js";
 import { showToast } from "../lib/toast.js";
 import { PrintHeader } from "../components/PrintDocument.jsx";
 import StoredImage from "../components/StoredImage.jsx";
+import { stampStatusTiming } from "../lib/taskTiming.js";
 
 const TABS = [
   { key: "devriye", label: "Devriye & Olaylar" },
@@ -62,29 +65,72 @@ const MOBILE_DEFAULT_TAB = "mahal";
 // gerçek zamanlı dikte metne çevrilip Açıklamalar kutusuna eklenir, ekstra
 // bir AI/API çağrısı ya da anahtar YOKTUR. Chrome/Edge destekler; Safari/
 // Firefox'ta API yoksa buton kullanıcıya toast ile bilgi verir.
+// Kullanıcı teyidiyle bulunan hata: "dikte et yapınca donuyor" — sebep
+// `continuous: true` idi: mobil tarayıcılarda (özellikle Android Chrome)
+// bu mod bazen `onend` HİÇ tetiklemeden mikrofonu açık/asılı bırakıyor,
+// buton "Dinliyor…" durumunda kilitli kalıyordu. Artık her cümle
+// `continuous:false` ile tek seferlik tanınıyor; kullanıcı hâlâ dikte
+// ediyorsa (activeRef true) `onend`'de kısa bir gecikmeyle KENDİLİĞİNDEN
+// yeniden başlatılıyor — kullanıcıya hâlâ kesintisiz gibi hissettiriyor
+// ama tek bir `continuous` oturumunun asılı kalma riskini taşımıyor. Ayrıca
+// 60 sn'lik mutlak bir güvenlik zaman aşımı var — ne olursa olsun buton
+// asla kalıcı kilitli kalmaz.
 function useSpeechDictation(onFinalText) {
   const recRef = useRef(null);
+  const activeRef = useRef(false);
+  const timeoutRef = useRef(null);
   const [listening, setListening] = useState(false);
-  function toggle() {
-    if (listening) { recRef.current?.stop(); return; }
+
+  function clearSafety() {
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+  }
+  function hardStop() {
+    activeRef.current = false;
+    clearSafety();
+    try { recRef.current?.stop(); } catch { /* zaten durmuş olabilir, yoksay */ }
+    setListening(false);
+  }
+  function startOnce() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { showToast("Tarayıcınız sesli dikteyi desteklemiyor — Chrome veya Edge kullanın.", "error"); return; }
-    const rec = new SR();
-    rec.lang = "tr-TR";
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.onresult = (e) => {
-      let text = "";
-      for (let idx = e.resultIndex; idx < e.results.length; idx++) {
-        if (e.results[idx].isFinal) text += e.results[idx][0].transcript;
-      }
-      if (text.trim()) onFinalText(text.trim());
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    rec.start();
+    if (!SR) { showToast("Tarayıcınız sesli dikteyi desteklemiyor — Chrome veya Edge kullanın.", "error"); activeRef.current = false; setListening(false); return; }
+    let rec;
+    try {
+      rec = new SR();
+      rec.lang = "tr-TR";
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.onresult = (e) => {
+        let text = "";
+        for (let idx = e.resultIndex; idx < e.results.length; idx++) {
+          if (e.results[idx].isFinal) text += e.results[idx][0].transcript;
+        }
+        if (text.trim()) onFinalText(text.trim());
+      };
+      rec.onerror = (e) => {
+        if (e.error === "no-speech" || e.error === "aborted") return; // sessizlik/duraklama — devam
+        activeRef.current = false;
+        setListening(false);
+      };
+      rec.onend = () => {
+        if (activeRef.current) { setTimeout(() => activeRef.current && startOnce(), 250); return; }
+        setListening(false);
+      };
+      rec.start();
+    } catch (err) {
+      console.error("Dikte başlatılamadı:", err);
+      activeRef.current = false;
+      setListening(false);
+      return;
+    }
     recRef.current = rec;
+  }
+  function toggle() {
+    if (listening) { hardStop(); return; }
+    activeRef.current = true;
     setListening(true);
+    startOnce();
+    clearSafety();
+    timeoutRef.current = setTimeout(hardStop, 60000);
   }
   return { listening, toggle };
 }
@@ -192,15 +238,13 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
   function saveTask() {
     if (!taskForm.description.trim()) return;
     const id = taskForm.id || `t_${Date.now()}`;
-    const payload = { ...taskForm, id, department: "Güvenlik", createdAt: taskForm.createdAt || new Date().toISOString(), createdBy: taskForm.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser };
+    const prevTask = taskForm.id ? state.tasks.find((t) => t.id === id) : null;
+    const payload = stampStatusTiming(prevTask?.status, { ...taskForm, id, department: "Güvenlik", createdAt: taskForm.createdAt || new Date().toISOString(), createdBy: taskForm.createdBy || currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser });
     const tasks = taskForm.id ? state.tasks.map((t) => (t.id === id ? payload : t)) : [...state.tasks, payload];
     updateState({ tasks });
     setTaskFormOpen(false);
   }
   function removeTask(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
-  function saveMobileTask(updated) {
-    updateState({ tasks: state.tasks.map((t) => (t.id === updated.id ? updated : t)) });
-  }
 
   return (
     <div>
@@ -259,11 +303,14 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
                 </div>
               </Field>
               <Field label="Açıklamalar" required right={
-                <button type="button" onClick={dictation.toggle} title={dictation.listening ? "Dikteyi durdur" : "Mikrofonla anlat"}
-                  style={{ display: "flex", alignItems: "center", gap: 5, border: "none", borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", textTransform: "none", letterSpacing: 0, background: dictation.listening ? "#DC5A34" : T.accent, color: dictation.listening ? "#fff" : "#0B1420" }}>
-                  {dictation.listening ? <MicOff size={12} /> : <Mic size={12} />}
-                  {dictation.listening ? "Dinliyor…" : "Sesle anlat"}
-                </button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="button" onClick={dictation.toggle} title={dictation.listening ? "Dikteyi durdur" : "Mikrofonla anlat"}
+                    style={{ display: "flex", alignItems: "center", gap: 5, border: "none", borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontWeight: 700, cursor: "pointer", textTransform: "none", letterSpacing: 0, background: dictation.listening ? "#DC5A34" : T.accent, color: dictation.listening ? "#fff" : "#0B1420" }}>
+                    {dictation.listening ? <MicOff size={12} /> : <Mic size={12} />}
+                    {dictation.listening ? "Dinliyor…" : "Sesle anlat"}
+                  </button>
+                  <AiEditButton value={form.description} onChange={(text) => setForm((f) => ({ ...f, description: text }))} context="tutanak" />
+                </div>
               }>
                 <TextArea style={{ width: "100%", minHeight: 140 }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
               </Field>
@@ -333,14 +380,33 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
               {state.incidents.length === 0 && <p style={{ fontSize: 12.5, color: T.dim }}>Kayıt yok.</p>}
               {state.incidents.map((i) => {
                 const signedCount = (i.signatures || []).filter((s) => s.signature).length;
+                // Kullanıcı teyidiyle: "vardiya amirlerinin açtığı olay
+                // tutanağı onay bekliyor uyarısı veriyormu... onay bekleyen
+                // form uyarı işareti olsun" — sadece "eksik imza var" değil,
+                // özellikle tutanağı hazırlayanlar (Vardiya Amiri + Güvenlik
+                // Görevlisi) kendi imzalarını ATMIŞ ama Güvenlik Müdürü'nün
+                // onay imzası hâlâ BOŞ olan kayıtlar — bunlar gerçekten
+                // müdürün onayını bekliyor, henüz hazırlanmakta olan bir
+                // tutanaktan farklı.
+                const approvalSig = (i.signatures || []).find((s) => s.role === "Güvenlik Müdürü (Onay)");
+                const authorsSigned = (i.signatures || []).filter((s) => s.role !== "Güvenlik Müdürü (Onay)").every((s) => s.signature);
+                const pendingApproval = !!approvalSig && !approvalSig.signature && authorsSigned;
                 return (
                   <button key={i.id} onClick={() => setViewIncident(i)} style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", boxSizing: "border-box", padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink }}>{i.location || i.type || "Olay"}{i.shift ? ` · ${i.shift}` : ""}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {pendingApproval && <AlertTriangle size={13} color="#DC5A34" style={{ flexShrink: 0 }} />}
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink }}>{i.location || i.type || "Olay"}{i.shift ? ` · ${i.shift}` : ""}</div>
+                    </div>
                     <div style={{ fontSize: 11.5, color: T.dim, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.description}</div>
                     <div style={{ fontSize: 10.5, color: T.dimmer, marginTop: 2 }}>
                       {i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : fmtDateTime(i.at)}{i.saat ? ` ${i.saat}` : ""} · {i.reportedBy}
                       {i.signatures && <span style={{ color: signedCount === i.signatures.length ? "#3FB37F" : "#E0B354", fontWeight: 700 }}> · {signedCount}/{i.signatures.length} imza</span>}
                     </div>
+                    {pendingApproval && (
+                      <div style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 800, color: "#DC5A34", background: "rgba(220,90,52,0.10)", borderRadius: 999, padding: "2px 8px" }}>
+                        Müdür Onayı Bekliyor
+                      </div>
+                    )}
                   </button>
                 );
               })}
@@ -349,14 +415,21 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />}
+      {/* Kullanıcı teyidiyle: "aynı yapıyı teknik ve güvenliğede istiyorum"
+          — kat akordionu (bkz. mobile/grid/MahalGridScreen.jsx) mobilde;
+          masaüstü hâlâ vardiya (gündüz/gece) farkındalı eski MahalKontrol.jsx.
+          Bilinen sınır: MahalGridScreen henüz vardiya seçimi yapmıyor (her
+          zaman shift=null ile açar) — devriye turu vardiya ayrımı şimdilik
+          sadece masaüstünde tam çalışıyor. */}
+      {tab === "mahal" && (
+        mobileMode
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />
+      )}
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <div>
-            <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt`} />
-            <MobileTaskList tasks={deptTasks} onSaveTask={saveMobileTask} emptyText="Kayıt yok." />
-          </div>
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Güvenlik departmanının işleri ve firma talepleri`}
@@ -488,7 +561,7 @@ function IncidentReportView({ incident: i, team, branding, logoUrl, canWrite, on
             <PrintHeader branding={branding} logoUrl={logoUrl} docTitle={photoUrls.length > 1 ? "Olay Fotoğrafları" : "Olay Fotoğrafı"} docSubtitle={printDate} />
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {photoUrls.map((url, idx) => (
-                <img key={idx} src={url} alt={`Olay fotoğrafı ${idx + 1}`} style={{ width: "100%", maxHeight: 210, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8 }} />
+                <StoredImage key={idx} src={url} alt={`Olay fotoğrafı ${idx + 1}`} style={{ width: "100%", maxHeight: 210, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8 }} />
               ))}
             </div>
           </div>

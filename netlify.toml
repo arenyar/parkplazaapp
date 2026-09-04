@@ -2,6 +2,9 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+
 # Netlify'ın secrets-scanner'ı src/firebase.js'teki Firebase Web API key'ini
 # (apiKey) "olası secret" diye işaretleyip build'i durduruyor. Bu GERÇEK bir
 # gizli anahtar DEĞİL — Firebase'in web istemci API anahtarları tarayıcıya

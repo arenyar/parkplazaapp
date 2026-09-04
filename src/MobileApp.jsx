@@ -13,7 +13,6 @@ import { TaslaklarScreen } from "./mobile/offline/TaslaklarScreen.jsx";
 import { TaskListScreen } from "./mobile/list/TaskListScreen.jsx";
 import { MahalGridScreen } from "./mobile/grid/MahalGridScreen.jsx";
 import { PersonnelScreen } from "./mobile/personnel/PersonnelScreen.jsx";
-import { MaintenanceScreen } from "./mobile/maintenance/MaintenanceScreen.jsx";
 import { SuggestionsScreen } from "./mobile/suggestions/SuggestionsScreen.jsx";
 import { ProfileScreen } from "./mobile/profile/ProfileScreen.jsx";
 import { Dashboard } from "./pages/Dashboard.jsx";
@@ -22,6 +21,7 @@ import { Kontroller } from "./pages/Kontroller.jsx";
 import { Guvenlik } from "./pages/Guvenlik.jsx";
 import { Dokumanlar } from "./pages/Dokumanlar.jsx";
 import { Raporlar } from "./pages/Raporlar.jsx";
+import { Duyurular } from "./pages/Duyurular.jsx";
 import { Ayarlar } from "./pages/Ayarlar.jsx";
 import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
 
@@ -54,14 +54,8 @@ function PlaceholderScreen({ baslik }) {
 // parkplaza-operations skill: "mobil saha personeline yönetim tanım
 // eylemleri verme"). Masaüstüne "Masaüstü sürümüne geç" ile erişilebilirler.
 function renderScreen(screenKey, p) {
-  // "Bakım takvimi" satırı izin kontrolü için "bakim" screenKey'ini
-  // paylaşıyor (bkz. navConfig.js) ama kendi ekranını render eder — bu
-  // yüzden genel switch'ten ÖNCE, activeNavKey'e göre ayrılıyor.
-  if (p.activeNavKey === "bakimtakvimi") {
-    return <MaintenanceScreen state={p.state} updateState={p.updateState} currentUser={p.currentUser} role={p.role} canWrite={p.canWrite("bakim")} />;
-  }
   switch (screenKey) {
-    case "dashboard": return <Dashboard state={p.state} role={p.role} onGoTo={p.goToOperasyonlar} onNewTask={() => p.newTask()} onScan={p.onScan} onOpenAlert={() => p.goToOperasyonlar()} onShortcut={p.goToDeptShortcut} />;
+    case "dashboard": return <Dashboard state={p.state} role={p.role} currentUser={p.currentUser} onGoTo={p.goToScreen} onNewTask={() => p.newTask()} onScan={p.onScan} onOpenAlert={() => p.goToOperasyonlar()} onShortcut={p.goToDeptShortcut} onOpenPerson={p.goToPerson} onOpenTicket={p.openTicket} />;
     case "operasyonlar": return (
       <TaskListScreen
         state={p.state} updateState={p.updateState} currentUserName={p.currentUserName}
@@ -69,7 +63,17 @@ function renderScreen(screenKey, p) {
         pendingAction={p.pendingTaskAction} onConsumePending={p.onConsumePending} canWrite={p.canWrite("operasyonlar")}
       />
     );
-    case "bakim": return <Teknik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} role={p.role} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("bakim")} mobileMode />;
+    // Kullanıcı teyidiyle bulunan hata: "bakım takvimine tıklayınca mahal
+    // kontrol görevler ekranı geliyor" — "Teknik bakım" ve "Bakım takvimi"
+    // AYNI screenKey'i ("bakim") paylaştığı için React ikisi arasında geçişte
+    // Teknik'i YENİDEN MOUNT ETMİYORDU, iç `tab` state'i bir önceki
+    // ziyaretten kalıyordu (deepLink null olduğunda sıfırlanmıyor, bkz.
+    // Teknik.jsx deepLink effect'i — QR/mahal deepLink'i tüketildiğinde de
+    // null olduğu için orada bilerek sıfırlamıyor). `key={activeNavKey}` bu
+    // iki giriş noktası arasında HER ZAMAN taze bir mount garanti eder; tab
+    // yine `useState` varsayılanından başlar, doğru deepLink varsa hemen
+    // üzerine yazılır.
+    case "bakim": return <Teknik key={p.activeNavKey} state={p.state} updateState={p.updateState} currentUser={p.currentUserName} currentUserObj={p.currentUser} role={p.role} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("bakim")} mobileMode />;
     case "kontroller": return <Kontroller state={p.state} updateState={p.updateState} currentUser={p.currentUserName} canWrite={p.canWrite("kontroller")} />;
     case "guvenlik": return <Guvenlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("guvenlik")} mobileMode />;
     case "temizlik": return (
@@ -83,8 +87,12 @@ function renderScreen(screenKey, p) {
     case "ayarlar": return <Ayarlar state={p.state} updateState={p.updateState} canWrite={p.canWrite("ayarlar")} />;
     default:
       if (p.activeNavKey === "taslaklar") return <TaslaklarScreen drafts={p.drafts} syncing={p.syncing} onRetry={p.onRetryDraft} onRetryAll={p.onRetryAllDrafts} />;
-      if (p.activeNavKey === "personel") return <PersonnelScreen state={p.state} currentUser={p.currentUser} role={p.role} />;
+      if (p.activeNavKey === "personel") return <PersonnelScreen state={p.state} currentUser={p.currentUser} role={p.role} initialPerson={p.personDeepLink} onConsumeInitialPerson={p.onConsumePersonDeepLink} />;
       if (p.activeNavKey === "oneriler") return <SuggestionsScreen state={p.state} updateState={p.updateState} currentUser={p.currentUser} role={p.role} />;
+      // Kullanıcı teyidiyle: "duyuru... web sayfasında bağlantısını
+      // göremiyorum" — Duyurular artık gerçek bir ekran (bkz. pages/
+      // Duyurular.jsx, App.jsx ile PAYLAŞILIYOR), placeholder'dan çıktı.
+      if (p.activeNavKey === "duyurular") return <Duyurular state={p.state} updateState={p.updateState} currentUser={p.currentUser} role={p.role} />;
       return <PlaceholderScreen baslik={navLabel(p.activeNavKey)} />;
   }
 }
@@ -133,6 +141,7 @@ function reconcilePatch(patch, liveState) {
 export function MobileApp({ state, updateState, currentUser, currentAccount, role, canWrite, branding, onLogout, dataReady, qrDeepLink, onConsumeQrDeepLink, scannerOpen, setScannerOpen, handleQrDecoded, canSwitchDept, deptOverride, onSetDeptOverride }) {
   const [activeNavKey, setActiveNavKey] = useState("dashboard");
   const [deepLink, setDeepLink] = useState(null);
+  const [personDeepLink, setPersonDeepLink] = useState(null);
   const [pendingTaskAction, setPendingTaskAction] = useState(null);
   const [drafts, setDrafts] = useState(getDrafts);
   const [syncing, setSyncing] = useState(false);
@@ -207,18 +216,41 @@ export function MobileApp({ state, updateState, currentUser, currentAccount, rol
   }, [qrDeepLink]);
 
   function goHome() { setActiveNavKey("dashboard"); setDeepLink(null); }
+  // Kullanıcı teyidiyle bulunan hata: Dashboard'un "Tümünü gör" gibi
+  // butonları `onGoTo("kontroller")` çağırıyordu ama bu fonksiyon argümanı
+  // YOK SAYIP her zaman "operasyonlar"a gidiyordu — artık gerçekten
+  // parametreyle gelen ekrana gider (aynı NavDrawer screenKey'leri).
+  function goToScreen(key) { setDeepLink(null); setActiveNavKey(key || "operasyonlar"); }
   function goToOperasyonlar() { setActiveNavKey("operasyonlar"); }
   function goToDeptShortcut(department, tab, action) {
     const target = DEPARTMENT_VIEW[department];
     setActiveNavKey(target || "operasyonlar");
     setDeepLink(target ? { department, tab, action } : null);
   }
-  // Not: `editTask`/pendingAction "edit" modu Faz 3'te kaldırıldı —
-  // TaskListScreen artık kart dokunmalarını kendi yerel state'iyle
-  // (openEdit) yönetiyor, MobileApp üzerinden geçmiyor.
+  // Kullanıcı teyidiyle: "Mobil Yönetici anasayfasında personellerin listesi
+  // gelsin... basınca personel detayı gelecek" — Dashboard > PersonnelAccordion
+  // bir kişiye tıklayınca buraya gelir, "Personel" ekranına o kişi seçili
+  // açılır (bkz. PersonnelScreen.jsx initialPerson).
+  function goToPerson(person) { setPersonDeepLink(person); setActiveNavKey("personel"); }
   function newTask(prefill) { setPendingTaskAction({ mode: "new", prefill }); setActiveNavKey("operasyonlar"); }
+  // Kullanıcı teyidiyle: "personellerin üzerindeki işler neler burda iş
+  // emri no varsa ona tıkladığımda detay görürüz" — Dashboard > Personel
+  // bölümündeki bir iş emri rozetine dokununca buraya gelir. TaskListScreen
+  // hâlâ `pendingAction.mode === "edit"`i destekliyor (bkz. o dosyadaki
+  // useEffect), sadece kart dokunmaları için ARTIK kullanılmıyordu — burada
+  // yeniden kullanıldı, yeni bir mekanizma icat edilmedi.
+  function openTicket(task) { setPendingTaskAction({ mode: "edit", task }); setActiveNavKey("operasyonlar"); }
 
+  // Kullanıcı teyidiyle: "Bakım takvimi tekniğin ekranına getirilebilsin" —
+  // artık kendi ayrı ekranı YOK, Teknik'in ("bakim" screenKey) deepLink
+  // yönlendirmesiyle "takvim" sekmesi seçili açılıyor — App.jsx'teki
+  // goToDeptShortcut ile AYNI mekanizma (bkz. Teknik.jsx deepLink effect'i).
   function handleNavSelect(item) {
+    if (item.key === "bakimtakvimi") {
+      setDeepLink({ department: "Teknik", tab: "takvim" });
+      setActiveNavKey(item.key);
+      return;
+    }
     setDeepLink(null);
     setActiveNavKey(item.key);
   }
@@ -272,10 +304,11 @@ export function MobileApp({ state, updateState, currentUser, currentAccount, rol
 
   const badge = computeGlobalBadge(state.tasks, currentUser.name);
   const screenProps = {
-    state, updateState: safeUpdateState, role, canWrite, deepLink, activeNavKey,
+    state, updateState: safeUpdateState, role, canWrite, deepLink, activeNavKey, personDeepLink,
     currentUserName: currentUser.name, currentUser, pendingTaskAction,
     onConsumeDeepLink: () => setDeepLink(null), onConsumePending: () => setPendingTaskAction(null),
-    onScan: () => setScannerOpen(true), goToOperasyonlar, goToDeptShortcut, newTask,
+    onConsumePersonDeepLink: () => setPersonDeepLink(null),
+    onScan: () => setScannerOpen(true), goToOperasyonlar, goToScreen, goToDeptShortcut, goToPerson, newTask, openTicket,
     drafts, syncing, onRetryDraft: retryDraft, onRetryAllDrafts: retryAllDrafts,
   };
 

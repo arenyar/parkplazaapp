@@ -8,6 +8,8 @@ import { buildFindings } from "../lib/findings.js";
 import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm } from "../components/TaskForm.jsx";
 import { SignaturePad } from "../components/SignaturePad.jsx";
+import { AiEditButton } from "../components/AiEditButton.jsx";
+import StoredImage from "../components/StoredImage.jsx";
 import { periodKey } from "../lib/periods.js";
 import { validateReading, latestReading } from "../lib/meterValidation.js";
 import { MAHAL_PERIODS, TALEP_TYPES } from "../mockData.js";
@@ -125,9 +127,19 @@ export function NonConformityPanel({ point, location, state, onClose }) {
   const locationRuns = state.mahalRuns.filter((r) => r.pointId === point.id && (r.locationKey || null) === (location?.key || null));
   const failedItems = locationRuns.flatMap((r) => (r.failedQuestions || []).map((f) => (r.shiftLabel ? `${r.shiftLabel}: ${f}` : f)));
   const openTasks = state.tasks.filter((t) => t.mahalPointId === point.id && (location ? t.locationKey === location.key : true) && t.status !== "Tamamlandı" && t.status !== "İptal");
+  // Kullanıcı teyidiyle: "mahal kontrollerde uygunsuzluk ve resim girilmişse
+  // detayına girildiğinde resimle birlikte uygunsuzluğu pdf olarak
+  // gösterebilirsin" — aynı buildFindings/FindingsPage kalıbı (Raporlar,
+  // Devriye Tur PDF'i ile PAYLAŞILIYOR, tekrar yazılmadı). Fotoğraf yoksa
+  // basılacak bir şey olmadığından Yazdır/PDF hiç gösterilmez.
+  const photos = locationRuns.filter((r) => r.photoUrl).map((r) => r.photoUrl);
+  const findings = buildFindings(state, locationRuns);
+  const printDate = new Date().toLocaleDateString("tr-TR");
+  function print() { setTimeout(() => window.print(), 60); }
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 210, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 420, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px 22px" }}>
+        <div className="no-print">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#132A20" }}>{point.name}{location ? ` — ${location.label}` : ""}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
@@ -143,6 +155,17 @@ export function NonConformityPanel({ point, location, state, onClose }) {
           <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "#8a8879" }}>Kontrol kaydında ayrıntı bulunamadı — açık iş emrinin açıklamasına bakın.</p>
         )}
 
+        {photos.length > 0 && (
+          <>
+            <div style={{ marginTop: 16, marginBottom: 6, fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", letterSpacing: 0.3 }}>Fotoğraf</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {photos.map((url, i) => (
+                <StoredImage key={i} src={url} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 8, border: "1px solid #E3DFD1" }} />
+              ))}
+            </div>
+          </>
+        )}
+
         <div style={{ marginTop: 16, marginBottom: 4, fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", letterSpacing: 0.3 }}>Açık İş Emirleri</div>
         {openTasks.length === 0 && <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "#8a8879" }}>Açık iş emri yok.</p>}
         {openTasks.map((t) => (
@@ -153,7 +176,17 @@ export function NonConformityPanel({ point, location, state, onClose }) {
           </div>
         ))}
 
-        <button onClick={onClose} style={{ width: "100%", marginTop: 18, border: "none", borderRadius: 999, padding: "11px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", background: "#F1EFE7", color: "#132A20" }}>Kapat</button>
+        {photos.length > 0 && (
+          <Button icon={Printer} variant="ghost" style={{ width: "100%", justifyContent: "center", marginTop: 18 }} onClick={print}>Yazdır / PDF</Button>
+        )}
+        <button onClick={onClose} style={{ width: "100%", marginTop: 8, border: "none", borderRadius: 999, padding: "11px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer", background: "#F1EFE7", color: "#132A20" }}>Kapat</button>
+        </div>
+
+        {photos.length > 0 && (
+          <div className="invoice-print-area">
+            <FindingsPage branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl} printDate={printDate} items={findings} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -179,6 +212,25 @@ export function resolveMeters(state, point, location) {
   return [...water, ...gas];
 }
 
+// Kullanıcı teyidiyle: "kendi iş başlatıp bitirebilmeli" — checklist'i
+// AÇMAK ile SUNMAK (submit) arasında gerçek, kalıcı bir "başladım" adımı
+// yoktu: FillModal kapatılıp bitirilmezse hiçbir iz kalmıyordu, "başlangıç"
+// sadece submit anında GERİYE dönük yazılıyordu. Artık "İşe Başla" ayrı bir
+// yazma — run'ı hemen "Üzr. Çalışılıyor" yapar, kişi FillModal'ı
+// tamamlamadan çıksa bile o kayıt "devam ediyor" olarak görünür kalır
+// (başka biri de görebilir, "kimse dokunmamış" sanılmaz). buildMahalFillPatch
+// (submit) bu run'ı bulup TAMAMLAR, ikinci bir kayıt açmaz.
+export function startMahalRun(state, point, location, personnelName, shift) {
+  const key = periodKey(point.period);
+  const existing = runFor(point, state.mahalRuns, location?.key, shift?.id);
+  if (existing && existing.status === "Tamamlandı") return {}; // zaten kapanmış bir dönemi "başlat" ile geri açma
+  const patch = { status: "Üzr. Çalışılıyor", startedAt: existing?.startedAt || new Date().toISOString(), startedBy: personnelName };
+  const mahalRuns = existing
+    ? state.mahalRuns.map((r) => (r.id === existing.id ? { ...r, ...patch } : r))
+    : [...state.mahalRuns, { id: `mr_${point.id}_${location?.key || "x"}_${key}${shift ? `_${shift.id}` : ""}`, pointId: point.id, department: point.department, periodKey: key, locationKey: location?.key, createdAt: new Date().toISOString(), ...patch }];
+  return { mahalRuns };
+}
+
 // FillModal'ın onSubmit payload'unu state patch'ine çevirir — MahalKontrol.jsx
 // ve Kontroller.jsx (çapraz departman genel görünüm) AYNI kaydetme mantığını
 // kullanır, tek kaynak (kullanıcı teyidiyle: "burda da düzenleme
@@ -188,7 +240,7 @@ export function resolveMeters(state, point, location) {
 // kontrollerini karıştırma") — burada açılan iş emri sadece başarısız
 // kontrolden doğan "Mahal Kontrol" tipi arıza kaydıdır, Talep/Şikayet
 // modülüyle ilgisi yok.
-export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, photoUrl, meterReadings, compensation, expiryDates, shift, signature }) {
+export function buildMahalFillPatch(state, point, location, { inspector, answers, note, photo, photoUrl, meterReadings, compensation, expiryDates, shift, signature, startedAt }) {
   // Kayıt her zaman var olduğu varsayılmaz — bekleyen "Bekliyor" plasehoder'ı
   // sadece MahalKontrol.jsx'in kendi effect'i o departman sayfası açıldığında
   // üretir. Kontroller.jsx (çapraz departman genel görünüm) o sayfa hiç
@@ -264,7 +316,12 @@ export function buildMahalFillPatch(state, point, location, { inspector, answers
   // submit) buraya URL olarak geliyor; `photo` boolean'ı geriye dönük
   // uyumluluk için (eski kayıtları filtreleyen kod bozulmasın) korunuyor,
   // ama artık `photoUrl` üzerinden gerçek görsele erişilebiliyor.
-  const runPatch = { status: "Tamamlandı", completedBy: inspector, completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, photoUrl: photoUrl || null, signatureUrl: signature || null, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
+  // Kullanıcı teyidiyle: "mahal kontrollerde de kontrole başladığı ve
+  // bitirdiği anları mahal mahal takip edecek şekilde sistemi kurgula" —
+  // FillModal açıldığı an (kontrole başlangıç) buradan geliyor; yoksa (ör.
+  // eski bir çağrı) en azından completedAt kadar geriye düşülür, hiç
+  // startedAt yazılmamış olmaz.
+  const runPatch = { status: "Tamamlandı", completedBy: inspector, startedAt: startedAt || existing?.startedAt || new Date().toISOString(), completedAt: new Date().toISOString(), answers, note, photo: photo ? true : false, photoUrl: photoUrl || null, signatureUrl: signature || null, failedQuestions: failed, shiftId: shift?.id || null, shiftLabel: shift?.label || null };
   const mahalRuns = existing
     ? state.mahalRuns.map((r) => (r.id === existing.id ? { ...r, ...runPatch } : r))
     : [...state.mahalRuns, { id: `mr_${point.id}_${location?.key || "x"}_${key}${shift ? `_${shift.id}` : ""}`, pointId: point.id, department: point.department, periodKey: key, locationKey: location?.key, createdAt: new Date().toISOString(), ...runPatch }];
@@ -424,6 +481,11 @@ function powerFactor(activeKw, reactiveKvar) {
 }
 
 export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, department, inTour, onSubmit, onClose, onReportIncident }) {
+  // Kullanıcı teyidiyle: "mahal kontrollerde de kontrole başladığı ve
+  // bitirdiği anları mahal mahal takip edecek şekilde sistemi kurgula" —
+  // bu form açıldığı an "kontrole başlangıç" kabul edilir (useState
+  // initializer ile bir kez, her re-render'da değil).
+  const [startedAt] = useState(() => new Date().toISOString());
   const [inspector, setInspector] = useState(currentUser || "");
   const [answers, setAnswers] = useState({});
   const [note, setNote] = useState("");
@@ -445,6 +507,24 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
   const [expiryDates, setExpiryDates] = useState({});
   const [activeKw, setActiveKw] = useState("");
   const [reactiveKvar, setReactiveKvar] = useState("");
+  // Kullanıcı teyidiyle: "haftalık kontrollerde jeneratör test ve yangın
+  // pompası testlerde çalışma zorunluluğu koy... bu süre dolmadan mahal
+  // kontrol formunu kapattırma" — sadece bunu isteyen noktalarda (bkz.
+  // mockData.js point.minRunMinutes, Jeneratör/Yangın Pompası testleri)
+  // "Kontrolü Tamamla" gerçek dakika sayacı dolmadan tıklanamaz. Referans an
+  // formun kendi açılış anı DEĞİL, kalıcı run.startedAt (bkz. startMahalRun)
+  // — modal kapatılıp tekrar açılsa bile geçen süre sıfırlanmaz.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!point.minRunMinutes) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [point.minRunMinutes]);
+  const runStartedAt = run?.startedAt || startedAt;
+  const minRunMs = (point.minRunMinutes || 0) * 60000;
+  const elapsedMs = nowTick - new Date(runStartedAt).getTime();
+  const minRunOk = !point.minRunMinutes || elapsedMs >= minRunMs;
+  const minRunRemainingSec = point.minRunMinutes ? Math.max(0, Math.ceil((minRunMs - elapsedMs) / 1000)) : 0;
   const now = new Date();
   const dateLabel = now.toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" }) + " · " + now.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
   // Konum kendi questions/assetDesc'ini taşıyabilir (ör. Temizlik'in tek
@@ -477,7 +557,8 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
   const allAnswered = questions.every((q, i) => (q.type === "sayi" ? answers[i] !== undefined && answers[i] !== "" : answers[i]))
     && meterChecks.every((m) => m.val != null) && !meterReadingsBlocked && !hasFailWithoutNote
     && (!point.compensation || (activeKw !== "" && reactiveKvar !== ""))
-    && (!requireSignature || !!signature);
+    && (!requireSignature || !!signature)
+    && minRunOk;
   const compPreview = activeKw !== "" && reactiveKvar !== "" ? powerFactor(Number(activeKw), Number(reactiveKvar)) : null;
 
   // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
@@ -527,12 +608,12 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
             </div>
           )}
           {run.photoUrl && (
-            <img src={run.photoUrl} alt="Kontrol fotoğrafı" style={{ marginTop: 12, width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 10 }} />
+            <StoredImage src={run.photoUrl} alt="Kontrol fotoğrafı" style={{ marginTop: 12, width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 10 }} />
           )}
           {run.signatureUrl && (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 }}>Personel İmzası</div>
-              <img src={run.signatureUrl} alt="İmza" style={{ width: "100%", height: 80, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8, background: "#fff" }} />
+              <StoredImage src={run.signatureUrl} alt="İmza" style={{ width: "100%", height: 80, objectFit: "contain", border: "1px solid #E3DFD1", borderRadius: 8, background: "#fff" }} />
             </div>
           )}
 
@@ -660,7 +741,10 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
         ))}
 
         <div style={{ marginBottom: 14 }}>
-          <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>Not (opsiyonel)</label>
+          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12.5, fontWeight: 700, color: "#132A20", marginBottom: 6 }}>
+            <span>Not (opsiyonel)</span>
+            <AiEditButton value={note} onChange={setNote} />
+          </label>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} style={{ width: "100%", minHeight: 70, padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DFD1", fontSize: 13, boxSizing: "border-box", resize: "vertical" }} />
         </div>
 
@@ -685,6 +769,18 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
           </div>
         )}
 
+        {!!point.minRunMinutes && (
+          <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: minRunOk ? "rgba(63,179,127,0.10)" : "rgba(224,138,62,0.12)", border: `1px solid ${minRunOk ? "#3FB37F" : "#E08A3E"}` }}>
+            {minRunOk ? (
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#2E7D4F" }}>✓ Test süresi ({point.minRunMinutes} dk) tamamlandı.</span>
+            ) : (
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#B4551E" }}>
+                Test çalışmaya devam etmeli — kalan süre: {String(Math.floor(minRunRemainingSec / 60)).padStart(2, "0")}:{String(minRunRemainingSec % 60).padStart(2, "0")} (zorunlu {point.minRunMinutes} dk)
+              </span>
+            )}
+          </div>
+        )}
+
         <button disabled={!allAnswered || !inspector || uploading} onClick={async () => {
           const meterReadingsPayload = {};
           meterChecks.forEach((m) => { if (m.val != null) meterReadingsPayload[m.meterId] = m.val; });
@@ -700,7 +796,7 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
           } finally {
             setUploading(false);
           }
-          onSubmit({ inspector, answers, note, photo: !!photoFile, photoUrl, signature: signatureUrl, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift });
+          onSubmit({ inspector, answers, note, photo: !!photoFile, photoUrl, signature: signatureUrl, meterReadings: meterReadingsPayload, compensation: point.compensation ? { activeKw: Number(activeKw), reactiveKvar: Number(reactiveKvar) } : null, expiryDates, shift, startedAt });
         }}
           style={{ width: "100%", border: "none", borderRadius: 999, padding: "13px 0", fontSize: 14, fontWeight: 700, cursor: allAnswered && inspector && !uploading ? "pointer" : "default", background: "#DC5A34", color: "#fff", opacity: allAnswered && inspector && !uploading ? 1 : 0.5 }}>
           {uploading ? "Kaydediliyor…" : "Kontrolü Tamamla"}

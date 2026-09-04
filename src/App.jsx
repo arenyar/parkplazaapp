@@ -33,6 +33,9 @@ import { Kpi } from "./pages/Kpi.jsx";
 import { Yonetim } from "./pages/Yonetim.jsx";
 import { Ayarlar } from "./pages/Ayarlar.jsx";
 import { MobilTasarim } from "./pages/MobilTasarim.jsx";
+import { Duyurular } from "./pages/Duyurular.jsx";
+import { Stok } from "./pages/Stok.jsx";
+import { SuggestionsScreen } from "./mobile/suggestions/SuggestionsScreen.jsx";
 
 // Mahal Kontrol QR'ı (bkz. MahalKontrol.jsx QrModal) hangi departman
 // sayfasına düşer — hem uygulama içi kamera taramasında (handleQrDecoded)
@@ -314,7 +317,12 @@ export default function App() {
   // açık), bu bayraklar bugüne kadarki webScreens modeliyle aynı güven
   // seviyesinde: istemci taraflı bir kullanılabilirlik kontrolü.
   const permissions = currentAccount.permissions || {};
-  const allowedScreens = Object.keys(permissions).filter((k) => permissions[k]?.view || permissions[k]?.read);
+  // Kullanıcı teyidiyle: "duyuru ve önerilerin web sayfasında bağlantısını
+  // göremiyorum" — Duyurular/Öneriler mobildeki gibi ("screenKey yok,
+  // herkese açık") izin haritasına bakılmadan her zaman erişilebilir; mevcut
+  // 33 kişinin permissions kaydı geriye dönük migrate edilmeden de çalışsın.
+  const OPEN_SCREENS = ["duyurular", "oneriler"];
+  const allowedScreens = [...new Set([...Object.keys(permissions).filter((k) => permissions[k]?.view || permissions[k]?.read), ...OPEN_SCREENS])];
   const activeView = allowedScreens.includes(view) ? view : (allowedScreens[0] || "dashboard");
   const canWrite = (screenKey) => !!permissions[screenKey]?.write;
   const canSwitchDept = (currentAccount.username || "").toLowerCase() === DEPT_SWITCH_TEST_EMAIL;
@@ -331,11 +339,12 @@ export default function App() {
   }
 
   const pages = {
-    dashboard: <Dashboard state={state} role={role} onGoTo={goTo} onNewTask={newTask} onScan={() => setScannerOpen(true)} onOpenAlert={handleAlertClick} onShortcut={goToDeptShortcut} />,
+    dashboard: <Dashboard state={state} role={role} currentUser={currentUser} onGoTo={goTo} onNewTask={newTask} onScan={() => setScannerOpen(true)} onOpenAlert={handleAlertClick} onShortcut={goToDeptShortcut} onOpenTicket={editTask} />,
     operasyonlar: <Operasyonlar state={state} updateState={updateState} currentUser={currentUser.name} onOpenTask={editTask} pendingAction={pendingTaskAction} onConsumePending={() => setPendingTaskAction(null)} canWrite={canWrite("operasyonlar")} />,
     katplani: <KatPlani state={state} updateState={updateState} canWrite={canWrite("katplani")} />,
     varliklar: <Varliklar state={state} updateState={updateState} selectedId={selectedAssetId} onSelect={setSelectedAssetId} canWrite={canWrite("varliklar")} />,
-    bakim: <Teknik state={state} updateState={updateState} currentUser={currentUser.name} role={role} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("bakim")} mobileMode={isMobile} />,
+    stok: <Stok state={state} updateState={updateState} canWrite={canWrite("stok")} />,
+    bakim: <Teknik state={state} updateState={updateState} currentUser={currentUser.name} currentUserObj={currentUser} role={role} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("bakim")} mobileMode={isMobile} />,
     kontroller: <Kontroller state={state} updateState={updateState} currentUser={currentUser.name} canWrite={canWrite("kontroller")} />,
     guvenlik: <Guvenlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("guvenlik")} mobileMode={isMobile} />,
     temizlik: <Temizlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("temizlik")} mobileMode={isMobile} />,
@@ -347,6 +356,11 @@ export default function App() {
     yonetim: <Yonetim state={state} updateState={updateState} canWrite={canWrite("yonetim")} />,
     mobiltasarim: <MobilTasarim state={state} updateState={updateState} />,
     ayarlar: <Ayarlar state={state} updateState={updateState} canWrite={canWrite("ayarlar")} />,
+    duyurular: <Duyurular state={state} updateState={updateState} currentUser={currentUser} role={role} />,
+    // Mobildeki <SuggestionsScreen> ile AYNI bileşen (canWrite hiç
+    // gönderilmiyor, varsayılan true — mobildeki "herkes öneri verebilir"
+    // davranışıyla birebir, izin sistemine bağlanmadı).
+    oneriler: <SuggestionsScreen state={state} updateState={updateState} currentUser={currentUser} role={role} />,
   };
 
   return (
