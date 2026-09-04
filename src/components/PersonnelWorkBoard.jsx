@@ -17,7 +17,13 @@ function PersonAvatar({ p, T, size = 38 }) {
   return <AvatarInitials name={p.name} size={size} bg={deptColor(p.department)} />;
 }
 
-const DEPARTMENTS = ["Teknik", "Güvenlik", "Temizlik"];
+// Kullanıcı teyidiyle: "yönetim departmanında muhasebe personeli var
+// bunlarda iş açılabilir aynı şekilde bana da iş açılabilir" — Personel
+// kartı sadece saha ekiplerini (Teknik/Güvenlik/Temizlik) gösteriyordu,
+// Yönetim departmanındaki personel (muhasebe, idari vb. + Yönetim'in
+// kendisi) hiç listelenmiyordu; kendine/onlara atanan işler İşlerim
+// kartında görünse de burada bir satırları yoktu. Artık dördüncü bölüm.
+const DEPARTMENTS = ["Teknik", "Güvenlik", "Temizlik", "Yönetim"];
 
 // Kullanıcı teyidiyle (kayan şeridi reddederek): "bu personel kısmı
 // istediğim gibi olmadı amacım personellerin üzerindeki işler neler burda
