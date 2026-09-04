@@ -17,7 +17,15 @@ const BASE_OPTIONS = {
   guvenlik: { key: "guvenlik", label: "Güvenlik olayı", icon: ShieldCheck, department: "Güvenlik" },
   temizlik: { key: "temizlik", label: "Temizlik kaydı", icon: Sparkles, department: "Temizlik" },
   talep: { key: "talep", label: "Talep oluştur", icon: Wrench, department: null },
-  gorev: { key: "gorev", label: "Görev oluştur", icon: ClipboardCheck, department: null, category: "Planlı Bakım" },
+  // DÜZELTME: burada `category: "Planlı Bakım"` yazıyordu — bu kategori
+  // SADECE Bakım Takvimi'nden otomatik oluşan kayıtlar için (bkz. Bakim.jsx,
+  // Teknik.jsx "Planlı Bakımlar" sekmesi: "Bakım Takvimi'nde işaretlenince
+  // otomatik oluşur"). Kullanıcı teyidiyle bulunan hata: "artı ile açtığım
+  // işler taleplerimi düşmüyor, planlı bakımlarda geliyor, havuza düşmedi"
+  // — sahada + ile elle açılan bir görev sahte bir "planlı bakım" gibi
+  // etiketlenip Planlı Bakımlar sekmesine gidiyor, Talep Yönetimi/Görevler
+  // havuzuna düşmüyordu.
+  gorev: { key: "gorev", label: "Görev oluştur", icon: ClipboardCheck, department: null, issueType: "Görev" },
 };
 const ORDER_BY_ROLE = {
   "Teknik": ["ariza", "talep", "gorev", "guvenlik", "temizlik"],

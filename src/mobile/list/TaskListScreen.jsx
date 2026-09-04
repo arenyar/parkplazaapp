@@ -89,7 +89,11 @@ export function TaskListScreen({ state, updateState, currentUserName, scope, pen
     const nextNo = Math.max(3100, ...state.tasks.map((tk) => tk.ticketNo || 0)) + 1;
     const base = { ...emptyTask(task.department, nextNo), location: task.location };
     if (key === "newRequest") setForm(base);
-    else if (key === "newTask") setForm({ ...base, category: "Planlı Bakım" });
+    // DÜZELTME: "category: Planlı Bakım" burada da YANLIŞTI — bkz.
+    // CreateSheet.jsx'teki aynı düzeltmenin notu. Bu kategori sadece Bakım
+    // Takvimi'nden otomatik oluşur, elle açılan bir görevi Planlı Bakımlar
+    // sekmesine kaçırıp Talep Yönetimi havuzundan düşürüyordu.
+    else if (key === "newTask") setForm({ ...base, issueType: "Görev" });
     else if (key === "reportIssue") setForm({ ...base, priority: "Yüksek" });
     else return;
     setFormOpen(true);
