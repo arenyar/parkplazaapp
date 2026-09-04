@@ -27,9 +27,17 @@ function isOpenTask(t) {
 // içeriğin ne olduğunu (firma kaynaklı VEYA mahal üzerinden açılan talep/
 // şikayet, sadece kiracıya özel değil) daha doğru yansıtan "Talep
 // Şikayetleri"ne çevrildi — filtre mantığı DEĞİŞMEDİ.
+// DÜZELTME (kullanıcı teyidiyle bulunan hata): "operasyonlar" kapsamının
+// filter'ı `null` idi — yani HİÇBİR ŞEYİ elemiyordu, Bakım Takvimi'nden
+// otomatik oluşan gerçek Planlı Bakım kayıtları da (bkz. mockData.js
+// seedMaintTask) bu havuza karışıyordu. Masaüstündeki AYNI ekranın karşılığı
+// (bkz. Operasyonlar.jsx "Görev Akışı") zaten `t.category !== "Planlı
+// Bakım"` filtresini kullanıyordu — mobilde de aynı kural uygulandı, tek
+// filtre tanımı (bu dosya) her iki tarafta da güncellendi.
+const NOT_PLANLI_BAKIM = (t) => t.category !== "Planlı Bakım";
 export const OPERASYONLAR_SCOPES = {
-  operasyonlar: { title: "Talep yönetimi", filter: null },
-  kiracitalepleri: { title: "Talep Şikayetleri", filter: (t) => !!t.company || t.viaMahal },
+  operasyonlar: { title: "Talep yönetimi", filter: NOT_PLANLI_BAKIM },
+  kiracitalepleri: { title: "Talep Şikayetleri", filter: (t) => (!!t.company || t.viaMahal) && NOT_PLANLI_BAKIM(t) },
 };
 
 // Bir menü satırının rozetini hesaplar: SADECE bana atanan açık kayıt sayısı
