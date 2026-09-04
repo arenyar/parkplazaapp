@@ -2,6 +2,16 @@
   command = "npm run build"
   publish = "dist"
 
+# Netlify'ın secrets-scanner'ı src/firebase.js'teki Firebase Web API key'ini
+# (apiKey) "olası secret" diye işaretleyip build'i durduruyor. Bu GERÇEK bir
+# gizli anahtar DEĞİL — Firebase'in web istemci API anahtarları tarayıcıya
+# gönderilmek üzere tasarlanmıştır (erişim kontrolü Firestore/Storage
+# security rules ile yapılır, bu anahtarı gizlemek güvenlik sağlamaz; bkz.
+# https://firebase.google.com/docs/projects/api-keys). Bu yüzden sadece bu
+# değeri tarama dışı bırakıyoruz — genel taramayı KAPATMIYORUZ.
+[build.environment]
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyBaG2wpFyFwri-q-LVjkdeYvvrSqJGYmis"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
