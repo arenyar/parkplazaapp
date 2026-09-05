@@ -3,6 +3,8 @@
 // bu dosyanın export ettiği ARRAY/OBJECT şekillerine göre yazıldı, geçiş kolay olur.
 
 import { clonePiramitFloors, floorPhrase, healDuplicateUnitIds } from "./piramitData.js";
+import { APP_VERSION } from "./version.js";
+import { isNativeApp } from "./lib/platform.js";
 import { backfillFirms, upsertFirmUnit, dedupeFirms, normalizeFirmKey } from "./lib/billing.js";
 
 export const BRANDING = {
@@ -1324,5 +1326,17 @@ export function migrateLegacyState(state) {
   const hasDuplicateNames = nameSet.size !== next.companies.length;
   const hasNamelessGhosts = next.companies.some((c) => !(c.name || "").trim());
   if (hasDuplicateNames || hasNamelessGhosts) next = { ...next, companies: dedupeFirms(next.companies) };
+  // Kullanıcı teyidiyle: "sürüm güncellendiğinde android uygulamalara
+  // güncelleme yap uyarısı" — bkz. src/version.js'teki not. Web sitesi HER
+  // ziyarette Netlify'dan taze kodla açıldığı için kendi APP_VERSION'ı her
+  // zaman en günceldir; burada state.appVersion.latest'ten daha yeniyse
+  // (sözlük sırasıyla) paylaşılan duruma kendini yazar — telefondaki eski
+  // APK'lar bunu canlı senkrondan görüp MobileApp.jsx'teki güncelleme
+  // uyarısını gösterir. Sadece web açılışında yazılır (isNativePlatform
+  // false), yoksa eski bir APK kendi (eski) sürümünü "en son" diye
+  // yazabilir ve uyarı hiç çıkmazdı.
+  if (!isNativeApp() && (!next.appVersion || next.appVersion.latest < APP_VERSION)) {
+    next = { ...next, appVersion: { latest: APP_VERSION, updatedAt: new Date().toISOString() } };
+  }
   return next;
 }

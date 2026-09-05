@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { Download, X } from "lucide-react";
+import { APP_VERSION } from "./version.js";
+import { isNativeApp } from "./lib/platform.js";
+import { useTaskAlertSounds } from "./lib/useTaskAlertSounds.js";
 import { GlobalStyle } from "./layout/GlobalStyle.jsx";
 import { ToastHost } from "./components/ToastHost.jsx";
 import { QrScannerModal } from "./layout/QrScannerModal.jsx";
@@ -27,6 +31,28 @@ import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
 
 const ALL_NAV_ITEMS = [...KISISEL_ITEMS, ...ARACLAR_ITEMS, ...DAHAFAZLA_ITEMS];
 const BOTTOM_TAB_LABELS = { dashboard: "Anasayfa", akis: "Akış" };
+
+// Kullanıcı teyidiyle: "sürüm güncellendiğinde android uygulamalara
+// güncelleme yap uyarısı" — bkz. src/version.js'teki not. SADECE gerçek
+// Android uygulamasında (Capacitor native) gösterilir — web sürümü zaten
+// her ziyarette taze; "kapat" ile geçici gizlenir (bir sonraki açılışta
+// hâlâ güncel değilse tekrar çıkar, kalıcı bir "bir daha gösterme" yok —
+// sahadaki herkesin güncellemesi önemli).
+function UpdateBanner({ latestVersion }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (!isNativeApp() || dismissed || !latestVersion || latestVersion <= APP_VERSION) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "#0B1420", color: "#fff" }}>
+      <Download size={16} color="#5B9BD9" style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, fontSize: 12, lineHeight: 1.4 }}>Yeni bir sürüm var — Ayarlar'dan güncelleyin, bazı özellikler eksik olabilir.</span>
+      <a href="https://github.com/arenyar/parkplazaapp/releases/download/android-latest/park-plaza-saha.apk" target="_blank" rel="noreferrer"
+        style={{ fontSize: 11.5, fontWeight: 700, color: "#5B9BD9", textDecoration: "none", whiteSpace: "nowrap", flexShrink: 0 }}>
+        İndir
+      </a>
+      <button onClick={() => setDismissed(true)} aria-label="Kapat" style={{ background: "none", border: "none", cursor: "pointer", color: "#9BA8B4", display: "flex", flexShrink: 0 }}><X size={15} /></button>
+    </div>
+  );
+}
 
 function navLabel(navKey) {
   return ALL_NAV_ITEMS.find((i) => i.key === navKey)?.label || BOTTOM_TAB_LABELS[navKey] || "Park Plaza";
@@ -164,6 +190,10 @@ export function MobileApp({ state, updateState, currentUser, currentAccount, rol
   updateStateRef.current = updateState;
 
   useEffect(() => subscribeDrafts(setDrafts), []);
+  // Kullanıcı teyidiyle: "havuza göre düşünde ses kendine iş atanınca farklı
+  // bir ses" — bkz. lib/useTaskAlertSounds.js (sadece uygulama açıkken/
+  // Android'de çalışır, ek bildirim altyapısı gerektirmez).
+  useTaskAlertSounds(state.tasks, currentUser);
 
   // GÜVENLİK KRİTİK: `stateRef.current` mount anında henüz Firestore'un
   // GERÇEK verisi değil, App.jsx'in `useState(makeInitialState)` ile
@@ -326,6 +356,7 @@ export function MobileApp({ state, updateState, currentUser, currentAccount, rol
       <div className="mobile-shell">
         <GlobalStyle />
         <ToastHost />
+        <UpdateBanner latestVersion={state.appVersion?.latest} />
         <AppShell
           topBar={{ baslik: navLabel(activeNavKey), kapsam: branding.siteName, bildirimSayisi: badge.count, bildirimKiremit: badge.urgent, onSearch: () => {} }}
           activeTab={activeTab}
