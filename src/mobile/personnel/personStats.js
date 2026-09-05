@@ -95,11 +95,18 @@ export function lastKnownFloor(state, personName, { staleAfterMinutes = 120, now
   return { floor, at: latest.completedAt, mahal: location?.label || point?.name || "", stale: ageMin > staleAfterMinutes };
 }
 
+// Kullanıcı teyidiyle bulunan hata: "havuzdaki işleri net göremiyorsun...
+// tarih yok hangisi yeni iş hangisi eski iş" — üç kategori de artık EN YENİ
+// üstte sıralı (createdAt'e göre); Ana Sayfa kartları (bkz. Dashboard.jsx)
+// bu sırayı DEĞİŞTİRMEDEN gösterip yanına tarihi de basıyor.
+function byNewest(tasks) {
+  return [...tasks].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
 export function openTasksByCategory(tasks, person) {
   const deptTasks = (tasks || []).filter((t) => isOpen(t) && t.department === person.department);
   return {
-    assigned: deptTasks.filter((t) => taskHasAssignee(t, person.name)),
-    teamOthers: deptTasks.filter((t) => !taskIsUnassigned(t) && !taskHasAssignee(t, person.name)),
-    pool: deptTasks.filter((t) => taskIsUnassigned(t)),
+    assigned: byNewest(deptTasks.filter((t) => taskHasAssignee(t, person.name))),
+    teamOthers: byNewest(deptTasks.filter((t) => !taskIsUnassigned(t) && !taskHasAssignee(t, person.name))),
+    pool: byNewest(deptTasks.filter((t) => taskIsUnassigned(t))),
   };
 }

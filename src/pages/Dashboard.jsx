@@ -1,5 +1,7 @@
 import { AlertTriangle, Plus, QrCode, Wrench, ClipboardList, ClipboardCheck, FileWarning, Gauge, FileText, Building2, ChevronRight } from "lucide-react";
 import { DEPARTMENT_VIEW } from "../lib/departmentView.js";
+import { fmtDateTime } from "../lib/format.js";
+import { taskIsUnassigned } from "../lib/taskAssignees.js";
 import { STATUS, PRIORITY_STYLES, deptColor } from "../theme.js";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { Card, CardTitle, Button } from "../components/ui.jsx";
@@ -99,7 +101,7 @@ const DEPT_SHORTCUTS = {
 // (mobil) sectionNodes.personel zaten null dönebiliyor, gereksiz boş kart
 // basılmasın diye visible filtresi ayrıca `sectionNodes[k]` doluluğuna
 // bakıyor (bkz. aşağıdaki `order.filter`).
-export const DEFAULT_SECTION_ORDER = ["ozet", "kisayollar", "personel", "islerim", "havuzdaBekleyen", "mahallerDurum", "dikkat", "canliAkis", "binaGenel", "oncelikler", "hizliIslemler", "binaDurumu", "bugun"];
+export const DEFAULT_SECTION_ORDER = ["ozet", "kisayollar", "personel", "islerim", "havuzdaBekleyen", "gonderdigim", "mahallerDurum", "dikkat", "canliAkis", "binaGenel", "oncelikler", "hizliIslemler", "binaDurumu", "bugun"];
 export const DEFAULT_HIDDEN_SECTIONS = ["binaDurumu", "bugun"];
 export const SECTION_LABELS = {
   ozet: "Özet (Başlık + İstatistik + İlerleme)",
@@ -110,6 +112,7 @@ export const SECTION_LABELS = {
   personel: "Personel (Departman Bazlı)",
   islerim: "İşlerim",
   havuzdaBekleyen: "Havuzda Bekleyen İşler",
+  gonderdigim: "Başka Departmana Gönderdiğim İşler",
   mahallerDurum: "Mahallere Göre Durum (Mahal Kontrol)",
   canliAkis: "Canlı Operasyon Akışı",
   binaGenel: "Bina Genel Görünümü",
@@ -217,6 +220,14 @@ export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan,
   // bir personel kaydına bağlı olmayabilir) boş kategori döner, bölüm o
   // durumda "kayıt yok" gösterir, hata vermez.
   const taskCategories = currentUser ? openTasksByCategory(state.tasks, currentUser) : { assigned: [], teamOthers: [], pool: [] };
+  // Kullanıcı teyidiyle: "örnek temizlik tekniğe iş açtı bu iş teknik
+  // üzerine alana kadar temizliğin ekranında görünsün" — "Görev Başlat"/
+  // "Arıza Kaydı Aç" akışı artık BAŞKA bir departmana da iş açabiliyor (bkz.
+  // QuickWorkFlow.jsx departman seçici); açan kişi karşı departman
+  // üstlenene (birine atanana) kadar kendi ekranında bu kaydı görebilsin
+  // diye — sadece BEN açtım + BAŞKA departmana + HÂLÂ kimseye atanmadıysa.
+  const sentPending = currentUser ? state.tasks.filter((t) => !t.archived && t.status !== "Tamamlandı" && t.status !== "İptal"
+    && t.createdBy === currentUser.name && t.department !== currentUser.department && taskIsUnassigned(t)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : [];
   const pendingArizaCount = openTasks.filter((t) => t.viaMahal || t.category === "Arıza Bakım").length;
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayTasks = scopedTasks.filter((t) => (t.createdAt || "").slice(0, 10) === todayStr);
@@ -329,7 +340,7 @@ export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan,
               style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
-                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""} · {fmtDateTime(t.createdAt)}</div>
               </span>
               <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
             </button>
@@ -349,13 +360,38 @@ export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan,
               style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
-                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""} · {fmtDateTime(t.createdAt)}</div>
               </span>
               <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
             </button>
           );
         })}
         {taskCategories.pool.length > 8 && <p style={{ fontSize: 11.5, color: T.dimmer, margin: "8px 0 0" }}>+{taskCategories.pool.length - 8} tane daha.</p>}
+      </Card>
+    ) : null,
+    // Kullanıcı teyidiyle: "temizlik tekniğe iş açtı bu iş teknik üzerine
+    // alana kadar temizliğin ekranında görünsün" — "Görev Başlat"/"Arıza
+    // Kaydı Aç" başka departmana da açılabiliyor artık (bkz. QuickWorkFlow.jsx
+    // departman seçici); açan kişi karşı taraf ÜSTLENENE (birine atanana)
+    // kadar burada görür, atanınca (taskIsUnassigned false olunca) kendiliğinden
+    // düşer.
+    gonderdigim: DEPT_SHORTCUTS[role] && sentPending.length > 0 ? (
+      <Card key="gonderdigim">
+        <CardTitle>Başka Departmana Gönderdiğim İşler</CardTitle>
+        {sentPending.slice(0, 8).map((t) => {
+          const ps = PRIORITY_STYLES[t.priority] || {};
+          return (
+            <button key={t.id} onClick={() => onOpenAlert({ goTo: "operasyonlar", ref: t })}
+              style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department} · henüz üstlenilmedi · {fmtDateTime(t.createdAt)}</div>
+              </span>
+              <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
+            </button>
+          );
+        })}
+        {sentPending.length > 8 && <p style={{ fontSize: 11.5, color: T.dimmer, margin: "8px 0 0" }}>+{sentPending.length - 8} tane daha.</p>}
       </Card>
     ) : null,
     // Referans görseldeki "Mahallere göre durum" listesi — gerçek mahal
@@ -401,7 +437,7 @@ export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan,
               style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 0", borderBottom: `1px solid ${T.line}`, boxSizing: "border-box" }}>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{t.ticketNo} · {t.description}</div>
-                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""}</div>
+                <div style={{ fontSize: 11, color: T.dim, marginTop: 1 }}>{t.department}{t.status ? ` · ${t.status}` : ""} · {fmtDateTime(t.createdAt)}</div>
               </span>
               <span style={{ background: ps.bg, color: ps.fg, fontSize: 9.5, fontWeight: 700, borderRadius: 999, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0 }}>{t.priority}</span>
             </button>
