@@ -11,6 +11,7 @@ import { allUnits, unitDisplayName } from "../lib/billing.js";
 import { uploadPhoto } from "../lib/storage.js";
 import StoredImage from "../components/StoredImage.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
+import { sendEmail } from "../lib/email.js";
 
 const STATUSES = ["Yapılacak", "Üzr. Çalışılıyor", "Tamamlandı", "İptal"];
 
@@ -128,6 +129,45 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
     if (file) setForm((f) => ({ ...f, photoFile: file, photoPreviewUrl: URL.createObjectURL(file), hasPhoto: true }));
   }
 
+  function buildRequestSummary(task) {
+    return `Kayıt No: #${task.ticketNo}\nDepartman: ${task.department}\nFirma: ${task.company || "—"}\nKonum: ${task.location || "—"}\nAçıklama: ${task.description}\nOluşturan: ${task.createdBy || task.requester}`;
+  }
+  // Kullanıcı teyidiyle: "Talep ve şikayet ofisten geliyorsa tanımlı maile
+  // süreç ile ilgili bilgilendirme yapabilelim. iş tamamlandığında mail
+  // gitsin ve kısa bir anket yıldız modeli ve not". Gmail SMTP altyapısı
+  // (bkz. lib/email.js, Ayarlar > Genel) hazır olunca netleşti. Gönderim
+  // ARKA PLANDA (await edilmiyor, kayıt zaten kaydedildi) — e-posta
+  // başarısız olursa kayıt geri alınmaz, sadece konsola düşer.
+  //
+  // "Anket" — kullanıcının istediği tıklanabilir yıldız arayüzü, anonim
+  // yanıt toplayan YENİ ve güvenlik açısından dikkat gerektiren bir
+  // backend (Firebase Admin SDK + ayrı bir Netlify fonksiyonu, açık bir
+  // Firestore yazma kuralı YERİNE) gerektirir — bu henüz yapılmadı, bu
+  // konu ayrıca konuşulmalı. Bunun yerine MVP: firma yetkilisinden e-posta
+  // YANITI olarak puan/not istenir — ek altyapı gerektirmez.
+  async function notifyByEmail(task, kind) {
+    const notifyTo = state.notificationEmail;
+    try {
+      if (kind === "created" && notifyTo) {
+        await sendEmail({ to: notifyTo, subject: `Yeni Talep/Şikayet — #${task.ticketNo}`, text: `Yeni bir talep/şikayet kaydı oluşturuldu.\n\n${buildRequestSummary(task)}` });
+      }
+      if (kind === "completed") {
+        if (notifyTo) {
+          await sendEmail({ to: notifyTo, subject: `Talep Tamamlandı — #${task.ticketNo}`, text: `Bir talep/şikayet tamamlandı.\n\n${buildRequestSummary(task)}\n\nÇözüm: ${task.resolution}` });
+        }
+        const companyRec = state.companies.find((c) => c.name === task.company);
+        if (companyRec?.email) {
+          await sendEmail({
+            to: companyRec.email,
+            subject: `Talebiniz Tamamlandı — #${task.ticketNo}`,
+            text: `Sayın Yetkili,\n\n"${task.description}" konulu talebiniz tamamlanmıştır.\n\nYapılan işlem: ${task.resolution}\n\nHizmetimizi değerlendirmek isterseniz bu e-postaya 1-5 arası bir puan ve varsa kısa bir notla yanıt verebilirsiniz.\n\nSaygılarımızla,\nPark Plaza Maslak Yönetimi`,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Bildirim e-postası gönderilemedi:", err);
+    }
+  }
   // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
   // — bkz. lib/storage.js uploadPhoto. Düzenlemede yeni fotoğraf SEÇMEDİYSE
   // mevcut form.photoUrl (startEdit'te t.photoUrl'den geliyor) korunur.
@@ -157,16 +197,21 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
       hasPhoto: form.hasPhoto || !!photoUrl, photoUrl, rootCause: form.rootCause, resolution: form.resolution, closedDate: form.closedDate,
     };
     // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
+    let finalTask, prevStatus;
     if (form.id) {
       const prevTask = state.tasks.find((t) => t.id === form.id);
-      const tasks = state.tasks.map((t) => (t.id === form.id ? stampStatusTiming(prevTask?.status, { ...t, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser }) : t));
+      prevStatus = prevTask?.status;
+      finalTask = stampStatusTiming(prevStatus, { ...prevTask, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser });
+      const tasks = state.tasks.map((t) => (t.id === form.id ? finalTask : t));
       updateState({ tasks });
     } else {
       const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-      const task = stampStatusTiming(null, { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...payload });
-      updateState({ tasks: [...state.tasks, task] });
+      finalTask = stampStatusTiming(null, { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), createdBy: currentUser, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...payload });
+      updateState({ tasks: [...state.tasks, finalTask] });
     }
     setFormOpen(false);
+    if (!form.id) notifyByEmail(finalTask, "created");
+    else if (prevStatus !== "Tamamlandı" && finalTask.status === "Tamamlandı") notifyByEmail(finalTask, "completed");
   }
   // Kalıcı silme yerine arşivleme — kullanıcı teyidiyle: "iş emirleri...
   // geçmişe dönük raporlamalarda kullanılabilecek veriler". Kayıt Firestore'da
