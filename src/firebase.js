@@ -210,3 +210,11 @@ export async function saveState(patch, { silent = false } = {}) {
     return false;
   }
 }
+
+// Ayarlar > Yedekler'den bir sürüm yedeğine "geri dön" — saveState'in aksine
+// MERGE DEĞİL, dokümanın TAMAMINI yedekteki hâliyle değiştirir (bkz.
+// lib/backup.js) — geri dönülen eski sürümde henüz var olmayan alanlar da
+// gerçekten kaybolsun diye (yarım bir "geri dönüş" olmasın).
+export async function restoreState(fullState) {
+  await setDoc(STATE_DOC, stripUndefined(fullState));
+}

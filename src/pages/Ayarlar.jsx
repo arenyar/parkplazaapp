@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { X, Smartphone, KeyRound } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Smartphone, KeyRound, History, RotateCcw } from "lucide-react";
 import { deptColor } from "../theme.js";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, CardTitle, Button, Field, Input, Select } from "../components/ui.jsx";
 import { NAV_ITEMS } from "../layout/navItems.js";
-import { resetPasswordEmail } from "../firebase.js";
+import { resetPasswordEmail, restoreState } from "../firebase.js";
+import { listVersionBackups } from "../lib/backup.js";
 import { showToast } from "../lib/toast.js";
 import { authErrorMessage } from "../lib/authErrors.js";
+import { APP_VERSION } from "../version.js";
 
 const TABS = [
   { key: "genel", label: "Genel" },
@@ -14,6 +16,7 @@ const TABS = [
   { key: "departmanlar", label: "Departmanlar" },
   { key: "talepturleri", label: "Talep Türleri" },
   { key: "yetkilendirme", label: "Kullanıcı Yetkilendirme" },
+  { key: "yedekler", label: "Yedekler" },
 ];
 
 function ChipList({ title, items, onAdd, onRemove }) {
@@ -322,6 +325,85 @@ function UserAccessTable({ state, updateState, canWrite, currentUser }) {
   );
 }
 
+function fmtBackupDate(ts) {
+  if (!ts) return "—";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// Kullanıcı teyidiyle: "bundan sonra her deployda versiyon bilgisi olsun.
+// yanlış düzenlemelere karşı deploy öncesi versiyona dönebilecek şekilde
+// yedek olsun." — App.jsx her yeni sürüm ilk canlıya geldiğinde (bkz. o
+// dosyadaki subscribeState effect'i) otomatik olarak BİR yedek alır (bkz.
+// lib/backup.js). Burada bu yedekler listelenir; geri dönüş TÜM canlı
+// veriyi anında değiştirdiği (herkesin ekranını etkiler) için, yanlışlıkla
+// tıklanmasın diye tek tıkla değil, yedeğin hedef sürümünü yazarak
+// onaylanan iki adımlı bir akış kullanılıyor.
+function BackupsPanel({ canWrite }) {
+  const T = useTheme();
+  const [backups, setBackups] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => {
+    listVersionBackups().then(setBackups).catch(() => setBackups([]));
+  }, []);
+
+  function startConfirm(b) { setConfirmId(b.id); setConfirmText(""); }
+  function cancelConfirm() { setConfirmId(null); setConfirmText(""); }
+
+  async function doRestore(b) {
+    setRestoring(true);
+    try {
+      await restoreState(b.state);
+      showToast("Yedek geri yüklendi — sayfa yeniden yükleniyor…", "success");
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (err) {
+      showToast("Geri yükleme başarısız: " + (err.message || "bilinmeyen hata"), "error");
+    } finally {
+      setRestoring(false);
+      cancelConfirm();
+    }
+  }
+
+  return (
+    <div>
+      <PageHeader title="Yedekler" subtitle={`Şu an yayında: sürüm ${APP_VERSION} — her yeni sürüm ilk yayına girdiğinde bir önceki verinin otomatik yedeği alınır`} />
+      {backups === null && <Card><p style={{ margin: 0, fontSize: 12.5, color: T.dim }}>Yedekler yükleniyor…</p></Card>}
+      {backups?.length === 0 && <Card><p style={{ margin: 0, fontSize: 12.5, color: T.dim }}>Henüz otomatik bir sürüm yedeği alınmadı — bu, ilk sürüm geçişinde oluşacak.</p></Card>}
+      {backups?.map((b) => (
+        <Card key={b.id} style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <History size={18} color={T.dim} style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>
+                {b.fromVersion || "İlk sürüm"} → {b.toVersion || "?"} geçişinden önceki veri
+              </div>
+              <div style={{ fontSize: 11, color: T.dimmer }}>{fmtBackupDate(b.savedAt)}</div>
+            </div>
+            {canWrite && confirmId !== b.id && (
+              <Button variant="ghost" onClick={() => startConfirm(b)}><RotateCcw size={13} style={{ marginRight: 5 }} /> Bu Yedeğe Dön</Button>
+            )}
+          </div>
+          {canWrite && confirmId === b.id && (
+            <div style={{ marginTop: 12, borderTop: `1px solid ${T.line}`, paddingTop: 12 }}>
+              <p style={{ fontSize: 12, color: "#DC5A34", margin: "0 0 8px", fontWeight: 600 }}>
+                Bu işlem CANLI veriyi anında bu yedekteki hâliyle değiştirir — {b.fromVersion || "ilk sürüm"} sonrasında girilen TÜM veri kaybolur. Geri alınamaz. Devam etmek için aşağıya "{b.fromVersion || "ILK"}" yazın.
+              </p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={b.fromVersion || "ILK"} style={{ maxWidth: 200 }} />
+                <Button disabled={restoring || confirmText !== (b.fromVersion || "ILK")} onClick={() => doRestore(b)}>{restoring ? "Geri yükleniyor…" : "Onayla ve Geri Yükle"}</Button>
+                <Button variant="ghost" onClick={cancelConfirm}>Vazgeç</Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 // Kat Planı / Firmalar (malik-kiracı) artık Operasyonlar > Kat Planı sekmesinde
 // yönetiliyor — binanın tüm departmanlarının (Teknik/Temizlik/Güvenlik/Talep-
 // Şikayet) referans aldığı ortak veri olduğu için buradan taşındı.
@@ -349,6 +431,11 @@ export function Ayarlar({ state, updateState, canWrite = true, currentUser }) {
       {tab === "genel" && (
         <div>
           <PageHeader title="Genel" subtitle="Marka ve genel yapılandırma — başka bir bina/müşteri için buradan uyarlanır" />
+          <Card style={{ marginBottom: 16 }}>
+            <CardTitle>Sürüm</CardTitle>
+            <p style={{ margin: 0, fontSize: 13, color: T.ink }}>Şu an yayında: <b>{APP_VERSION}</b></p>
+            <p style={{ margin: "4px 0 0", fontSize: 11, color: T.dimmer }}>Eski bir sürüme dönmek gerekirse Yedekler sekmesinden yapılabilir.</p>
+          </Card>
           <Card>
             <CardTitle>Marka / Bina Bilgisi</CardTitle>
             <Field label="Kurum adı"><Input disabled={!canWrite} value={state.branding.orgName} onChange={(e) => updateBranding({ orgName: e.target.value })} /></Field>
@@ -434,6 +521,7 @@ export function Ayarlar({ state, updateState, canWrite = true, currentUser }) {
       )}
 
       {tab === "yetkilendirme" && <UserAccessTable state={state} updateState={updateState} canWrite={canWrite} currentUser={currentUser} />}
+      {tab === "yedekler" && <BackupsPanel canWrite={canWrite} />}
     </div>
   );
 }

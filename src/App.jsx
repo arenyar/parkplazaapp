@@ -10,6 +10,7 @@ import { ToastHost } from "./components/ToastHost.jsx";
 import { showToast } from "./lib/toast.js";
 import { makeInitialState, migrateLegacyState } from "./mockData.js";
 import { subscribeState, saveState, authListen, logout as fbLogout } from "./firebase.js";
+import { saveVersionBackup } from "./lib/backup.js";
 import { useIsMobile } from "./lib/useIsMobile.js";
 import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
 import { T } from "./theme.js";
@@ -143,6 +144,16 @@ export default function App() {
         // mockData.js migrateLegacyState). users zaten varsa dokunmuyor.
         const migrated = migrateLegacyState(remote);
         setState(migrated);
+        // Kullanıcı teyidiyle: "her deployda versiyon bilgisi olsun. yanlış
+        // düzenlemelere karşı deploy öncesi versiyona dönebilecek şekilde
+        // yedek olsun." — migrateLegacyState yeni bir APP_VERSION'ı İLK KEZ
+        // damgaladığı an (bkz. mockData.js) tam olarak "deploy anı"dır; o
+        // andaki (henüz yeni sürümün dokunmadığı) `remote` burada ayrı bir
+        // yedek belgesine kopyalanır (bkz. lib/backup.js). Sadece versiyon
+        // değiştiğinde tetiklenir — her state değişikliğinde değil.
+        if (migrated.appVersion?.latest !== remote.appVersion?.latest) {
+          saveVersionBackup(remote, remote.appVersion?.latest);
+        }
         // Kullanıcı teyidiyle bulunan hata: "güvenlikte sildiğim görevler
         // silinmiyor" (silinen bir mahal kontrol noktası geri geliyor) — kök
         // neden burasıydı: migrateLegacyState HERHANGİ bir alanı düzeltince
