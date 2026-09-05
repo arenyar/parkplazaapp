@@ -14,6 +14,8 @@ import { stampStatusTiming } from "../lib/taskTiming.js";
 import { consumeStockPatch } from "../lib/stock.js";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
 import { AssetsFieldScreen } from "../mobile/assets/AssetsFieldScreen.jsx";
+import { AssetScanSheet } from "../mobile/create/AssetScanSheet.jsx";
+import { floorPhrase } from "../piramitData.js";
 
 const TABS = [
   { key: "takvim", label: "Bakım Takvimi" },
@@ -49,6 +51,14 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
   // gidileceğini belirtir (Görevler/Sayaç Okuma da olabilir) — kullanıcı
   // teyidiyle: "teknikte birde sayaç okuması yapacak".
   const quick = useQuickWorkFlow({ state, updateState, currentUser, department: "Teknik" });
+  // Kullanıcı teyidiyle (AI-CHECKLIST-PROJESI.md — QR okutunca varlık kartı +
+  // bakım/arıza seçimi, mobil taraf öncelikli): bir varlık QR'ı okutulunca
+  // (bkz. App.jsx handleQrDecoded/mount-effect) buraya `assetScan` deep
+  // link'i düşer; sheet açılır, seçime göre ya doğrudan bağlı Mahal Kontrol
+  // noktası açılır (focusPointId — hem MahalGridScreen hem MahalKontrol bunu
+  // dinler) ya da mevcut QuickWorkFlow "Arıza Kaydı Aç" akışı tetiklenir.
+  const [assetScan, setAssetScan] = useState(null);
+  const [focusPointId, setFocusPointId] = useState(null);
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Teknik") return;
     // Kullanıcı teyidiyle: "önce kat seçsin sonra departman seçsin..." — bkz.
@@ -57,6 +67,12 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
     // çünkü mobilde hangisinin render edildiği sekmeden sekmeye değişiyor.
     if (deepLink.action === "quickRequest") { quick.start({ mode: "ariza" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
+    if (deepLink.action === "assetScan") {
+      setTab("mahal");
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      onConsumeDeepLink();
+      return;
+    }
     setTab(deepLink.tab || "mahal");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink]);
@@ -149,8 +165,8 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
           eski admin/tanım ağırlıklı MahalKontrol.jsx'i kullanıyor. */}
       {tab === "mahal" && (
         mobileMode
-          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" canWrite={canWrite} />
-          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" canWrite={canWrite} focusPointId={focusPointId} onConsumeFocus={() => setFocusPointId(null)} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
       )}
 
       {tab === "planli" && (
@@ -187,6 +203,14 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
       {tab === "varliklar" && <AssetsFieldScreen state={state} updateState={updateState} canWrite={canWrite} />}
 
       <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
+      <AssetScanSheet assetScan={assetScan} asset={state.assets.find((a) => a.id === assetScan?.assetId)}
+        onClose={() => setAssetScan(null)}
+        onStartCheck={() => { setFocusPointId(assetScan.matchedPointId); setAssetScan(null); }}
+        onStartFault={() => {
+          const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          setAssetScan(null);
+        }} />
     </div>
   );
 }

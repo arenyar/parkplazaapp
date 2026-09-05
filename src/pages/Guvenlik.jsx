@@ -11,6 +11,8 @@ import { fmtDateTime } from "../lib/format.js";
 import { MahalKontrol } from "./MahalKontrol.jsx";
 import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
+import { AssetScanSheet } from "../mobile/create/AssetScanSheet.jsx";
+import { floorPhrase } from "../piramitData.js";
 import { uploadDataUrl, uploadPhoto } from "../lib/storage.js";
 import { findDeptManager } from "../mockData.js";
 import { openMailto } from "../lib/mailto.js";
@@ -150,6 +152,10 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
   // kısayolu ayrıca deepLink.action === "newIncident" ile formu da otomatik
   // açar (kullanıcı teyidiyle: "güvenlik olay tutanağı ve devriye tur olacak").
   const quick = useQuickWorkFlow({ state, updateState, currentUser, department: "Güvenlik" });
+  // bkz. Teknik.jsx'teki aynı not — varlık QR'ı (ör. bariyer, kamera)
+  // okutulunca buraya assetScan deep link'i düşer.
+  const [assetScan, setAssetScan] = useState(null);
+  const [focusPointId, setFocusPointId] = useState(null);
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Güvenlik") return;
     // Kullanıcı teyidiyle: "önce kat seçsin sonra departman seçsin..." — bkz.
@@ -159,6 +165,12 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     // artık bu iki action'ı hiç dinlemiyor.
     if (deepLink.action === "quickRequest") { quick.start({ mode: "ariza" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
+    if (deepLink.action === "assetScan") {
+      setTab("mahal");
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      onConsumeDeepLink();
+      return;
+    }
     const targetTab = deepLink.tab || "mahal";
     setTab(targetTab);
     if (deepLink.action === "newIncident") { setForm(emptyIncidentForm()); setFormOpen(true); }
@@ -436,8 +448,8 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
           sadece masaüstünde tam çalışıyor. */}
       {tab === "mahal" && (
         mobileMode
-          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} />
-          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} focusPointId={focusPointId} onConsumeFocus={() => setFocusPointId(null)} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
       )}
 
       {tab === "gorevler" && (
@@ -461,6 +473,14 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
       )}
 
       <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
+      <AssetScanSheet assetScan={assetScan} asset={state.assets.find((a) => a.id === assetScan?.assetId)}
+        onClose={() => setAssetScan(null)}
+        onStartCheck={() => { setFocusPointId(assetScan.matchedPointId); setAssetScan(null); }}
+        onStartFault={() => {
+          const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          setAssetScan(null);
+        }} />
     </div>
   );
 }

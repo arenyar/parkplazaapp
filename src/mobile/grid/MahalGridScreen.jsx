@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkles, ShieldCheck, AlertTriangle } from "lucide-react";
 import { getLocations, runFor, hasNonConformity, resolveMeters, buildMahalFillPatch, startMahalRun, NonConformityPanel, FillModal } from "../../pages/MahalKontrol.jsx";
 import { validateReading, latestReading } from "../../lib/meterValidation.js";
@@ -268,7 +268,7 @@ function CompensationReadingSheet({ target, onSave, onClose }) {
   );
 }
 
-export function MahalGridScreen({ state, updateState, currentUserName, department, canWrite = true }) {
+export function MahalGridScreen({ state, updateState, currentUserName, department, canWrite = true, focusPointId, onConsumeFocus }) {
   const [fillTarget, setFillTarget] = useState(null);
   const [issueForm, setIssueForm] = useState(null);
   // Kullanıcı teyidiyle: "arıza kaydı açıldığında o kattaki mahalleri
@@ -290,6 +290,21 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
   // AYNI kural (bkz. MahalKontrol.jsx `p.active !== false`).
   const points = state.mahalPoints.filter((p) => p.department === department && p.active !== false);
   const groups = groupByFloor(buildCells(points, state), state.piramitFloors);
+
+  // Kullanıcı teyidiyle (AI-CHECKLIST-PROJESI.md): bir varlık QR'ı okutulup
+  // "Bakım Kontrolü Yap" seçilince (bkz. pages/Teknik.jsx/Guvenlik.jsx
+  // AssetScanSheet) buraya bağlı noktanın id'si `focusPointId` olarak düşer
+  // — masaüstü MahalKontrol.jsx'in `deepLink.pointId` ile ZATEN yaptığının
+  // mobil (bu ekran) karşılığı. perFloor bir nokta için burada güvenli bir
+  // varsayılan yok (hangi lokasyon belirsiz) — o durumda sadece kat
+  // akordiyonunu açık bırakıp kullanıcı elle seçsin diye sessizce geçilir.
+  useEffect(() => {
+    if (!focusPointId) return;
+    const point = points.find((p) => p.id === focusPointId);
+    if (point && !point.perFloor) startAndOpenFill(point, null, "qr");
+    onConsumeFocus?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPointId]);
 
   function toggleFloor(floor) {
     setOpenFloors((s) => { const next = new Set(s); next.has(floor) ? next.delete(floor) : next.add(floor); return next; });
@@ -324,9 +339,14 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
   // açar açmaz run hemen "Üzr. Çalışılıyor" olarak KAYDEDİLİR (startMahalRun);
   // FillModal kapatılıp tamamlanmasa bile bu "başladım" izi kalıcıdır,
   // submit (buildMahalFillPatch) aynı run'ı bulup TAMAMLAR.
-  function startAndOpenFill(point, location) {
+  // `source`: "qr" (varlık QR'ı okutulup "Bakım Kontrolü Yap" seçildiğinde,
+  // bkz. focusPointId effect'i) | "manual" (listeden/kattan seçim) — masaüstü
+  // MahalKontrol.jsx'teki AYNI "elle doğrulandı"/"QR ile doğrulandı" ayrımı
+  // (bkz. o dosyadaki submitFill/requestFill) — FillModal zaten PAYLAŞILAN
+  // bir bileşen olduğu için (bkz. import) rozet otomatik burada da görünür.
+  function startAndOpenFill(point, location, source = "manual") {
     updateState(startMahalRun(state, point, location, currentUserName));
-    setFillTarget({ point, location });
+    setFillTarget({ point, location, source });
   }
   // Kullanıcı teyidiyle: "teknikte özellikle katlardaki mahal kontrolleri
   // günlük ayrı haftalık ayrı aylık ayrı olarak aç" — tek "Mahal Kontrol"
@@ -345,7 +365,12 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
     setRoomPicker({ group, mode: "kontrol", items: periodItems, periodLabel: period });
   }
   function submitFill(payload) {
-    updateState(buildMahalFillPatch(state, fillTarget.point, fillTarget.location, payload));
+    const { point, location, source } = fillTarget;
+    let patch = buildMahalFillPatch(state, point, location, payload);
+    if (patch.mahalRuns) {
+      patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (location?.key || null) ? { ...r, verifiedBy: source || "manual" } : r)) };
+    }
+    updateState(patch);
     setFillTarget(null);
   }
   function saveIssue() {

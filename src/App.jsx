@@ -13,6 +13,7 @@ import { subscribeState, saveState, authListen, logout as fbLogout } from "./fir
 import { saveVersionBackup } from "./lib/backup.js";
 import { useIsMobile } from "./lib/useIsMobile.js";
 import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
+import { resolveAssetScan } from "./lib/assetScan.js";
 import { T } from "./theme.js";
 
 import { Login } from "./pages/Login.jsx";
@@ -213,13 +214,21 @@ export default function App() {
   // artık subscribeState girişten önce çalışmadığı için state.mahalPoints
   // girişten önce hâlâ ilk mock veri olurdu, gerçek nokta ID'siyle eşleşmezdi.
   const [pendingQr, setPendingQr] = useState(null);
+  // Varlık QR'ı (bkz. components/AssetQr.jsx, `?asset=<varlıkId>`) — AYNI
+  // fiziksel-etiket/mount-effect deseni, `mahal` yerine `asset` parametresi.
+  const [pendingAssetId, setPendingAssetId] = useState(null);
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
       const mahalId = url.searchParams.get("mahal");
-      if (!mahalId) return;
-      setPendingQr({ mahalId, floorLabel: url.searchParams.get("floor") || null });
-      window.history.replaceState({}, "", url.pathname);
+      const assetId = url.searchParams.get("asset");
+      if (mahalId) {
+        setPendingQr({ mahalId, floorLabel: url.searchParams.get("floor") || null });
+        window.history.replaceState({}, "", url.pathname);
+      } else if (assetId) {
+        setPendingAssetId(assetId);
+        window.history.replaceState({}, "", url.pathname);
+      }
     } catch { /* geçersiz/parametresiz URL — normal açılış */ }
   }, []);
   useEffect(() => {
@@ -240,6 +249,19 @@ export default function App() {
     setQrLinkPending(true);
     setPendingQr(null);
   }, [pendingQr, dataReady, state.mahalPoints]);
+  useEffect(() => {
+    if (!pendingAssetId || !dataReady) return;
+    const resolved = resolveAssetScan(state, pendingAssetId);
+    if (!resolved) {
+      showToast("Bu QR'a ait bir varlık bulunamadı — Varlıklar ekranından manuel seçebilirsiniz.", "error");
+      setPendingAssetId(null);
+      return;
+    }
+    setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+    setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
+    setQrLinkPending(true);
+    setPendingAssetId(null);
+  }, [pendingAssetId, dataReady, state]);
 
   function goTo(key) { setView(key); setMobileNavOpen(false); }
   // Ana Sayfa'daki departman kısayolları (bkz. Dashboard.jsx DEPT_SHORTCUTS)
@@ -281,6 +303,7 @@ export default function App() {
     try {
       const url = new URL(text);
       const mahalId = url.searchParams.get("mahal");
+      const assetIdParam = url.searchParams.get("asset");
       if (mahalId) {
         const point = state.mahalPoints.find((p) => p.id === mahalId);
         if (point) {
@@ -294,10 +317,26 @@ export default function App() {
         setView("kontroller");
         return;
       }
-    } catch { /* metin URL değil — varlık eşleşmesine devam */ }
+      if (assetIdParam) {
+        const resolved = resolveAssetScan(state, assetIdParam);
+        if (resolved) {
+          setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+          setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
+          return;
+        }
+        showToast("Bu QR'a ait varlık artık tanımlı değil (arşivlenmiş olabilir) — Varlıklar ekranından manuel seçebilirsiniz.", "error");
+        setView("varliklar");
+        return;
+      }
+    } catch { /* metin URL değil — eski usül varlık adı eşleşmesine devam */ }
+    // Geriye dönük uyumluluk: eskiden (bu Faz'dan önce) basılmış olabilecek,
+    // URL olmayan düz metin QR'lar için isim/eski-id eşleşmesi.
     const asset = state.assets.find((a) => text.toLowerCase().includes(a.name.toLowerCase()) || a.id === text);
-    if (asset) { setSelectedAssetId(asset.id); setView("varliklar"); }
-    else showToast(`QR okundu: "${text}" — eşleşen bir varlık bulunamadı.`, "error");
+    if (asset) {
+      const resolved = resolveAssetScan(state, asset.id);
+      setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+      setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
+    } else showToast(`QR okundu: "${text}" — eşleşen bir varlık bulunamadı.`, "error");
   }
 
   // Üç durum: fbUser henüz belirlenmedi (kısa an, boş ekran — Login'in

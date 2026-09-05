@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, QrCode } from "lucide-react";
 import { T, PRIORITY_STYLES } from "../theme.js";
 import { PageHeader, Card, Button, Select, Field, Input, TextArea, Pagination } from "../components/ui.jsx";
 import { fmtDate } from "../lib/format.js";
@@ -7,6 +7,7 @@ import { ASSET_CATEGORIES } from "../mockData.js";
 import { assetIconFor } from "../lib/assetIcons.js";
 import { usePagination } from "../lib/usePagination.js";
 import { findAssetLocations, locationLabel } from "../piramitData.js";
+import { AssetQrModal, AssetBulkQrModal } from "../components/AssetQr.jsx";
 
 const STATUSES = ["Aktif", "Bakımda", "Arızalı", "Devre Dışı"];
 const CRITICALITY = ["Düşük", "Orta", "Yüksek", "Kritik"];
@@ -16,6 +17,13 @@ export function Varliklar({ state, updateState, selectedId, onSelect, canWrite =
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(empty());
   const [filterCat, setFilterCat] = useState("");
+  const [qrAsset, setQrAsset] = useState(null);
+  const [bulkQrOpen, setBulkQrOpen] = useState(false);
+
+  function markPrinted(ids) {
+    const idSet = new Set(ids);
+    updateState({ assets: state.assets.map((a) => (idSet.has(a.id) ? { ...a, qr: { printedAt: new Date().toISOString() } } : a)) });
+  }
 
   function startNew() { setForm(empty()); setFormOpen(true); onSelect(null); }
   function startEdit(a) { setForm({ ...a, kw: a.kw ?? "", kcalH: a.kcalH ?? "", airflowM3h: a.airflowM3h ?? "", dailyHours: a.dailyHours ?? "", expiryDate: a.expiryDate ?? "" }); setFormOpen(true); }
@@ -60,6 +68,7 @@ export function Varliklar({ state, updateState, selectedId, onSelect, canWrite =
       <PageHeader title="Varlıklar" subtitle={`${state.assets.length} kayıtlı ekipman`}
         right={<>
           <Select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}><option value="">Tüm kategoriler</option>{ASSET_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</Select>
+          {canWrite && filtered.length > 0 && <Button variant="quiet" icon={QrCode} onClick={() => setBulkQrOpen(true)}>QR Etiketleri Bas</Button>}
           {canWrite && <Button icon={Plus} onClick={startNew}>Yeni Varlık</Button>}
         </>} />
 
@@ -156,12 +165,11 @@ export function Varliklar({ state, updateState, selectedId, onSelect, canWrite =
                   <div style={{ fontSize: 10.5, fontWeight: 700, color: "#E0B354", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.3 }}>{selected.category}</div>
                 </div>
               </div>
-              {canWrite && (
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                <button onClick={() => startEdit(selected)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: T.dim }}><Pencil size={13} /></button>
-                <button onClick={() => remove(selected.id)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer" }}><Trash2 size={13} color="#E2685A" /></button>
+                <button onClick={() => setQrAsset(selected)} title="QR Kodu" style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: T.dim }}><QrCode size={13} /></button>
+                {canWrite && <button onClick={() => startEdit(selected)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: T.dim }}><Pencil size={13} /></button>}
+                {canWrite && <button onClick={() => remove(selected.id)} style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 8, padding: "5px 8px", cursor: "pointer" }}><Trash2 size={13} color="#E2685A" /></button>}
               </div>
-              )}
             </div>
             <div style={{ fontSize: 11, color: T.dimmer, margin: "8px 0 8px 52px", fontFamily: "ui-monospace, monospace" }}>{selected.id}</div>
             <div style={{ fontSize: 12.5, color: T.dim, lineHeight: 1.8 }}>
@@ -205,6 +213,8 @@ export function Varliklar({ state, updateState, selectedId, onSelect, canWrite =
           );
         })()}
       </div>
+      {qrAsset && <AssetQrModal asset={qrAsset} onPrinted={() => markPrinted([qrAsset.id])} onClose={() => setQrAsset(null)} />}
+      {bulkQrOpen && <AssetBulkQrModal assets={filtered} onPrinted={markPrinted} onClose={() => setBulkQrOpen(false)} />}
     </div>
   );
 }

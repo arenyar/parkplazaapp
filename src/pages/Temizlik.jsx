@@ -8,6 +8,8 @@ import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScree
 import { MahalKontrol } from "./MahalKontrol.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
+import { AssetScanSheet } from "../mobile/create/AssetScanSheet.jsx";
+import { floorPhrase } from "../piramitData.js";
 
 const TABS = [
   { key: "mahal", label: "Mahal Kontrol" },
@@ -24,6 +26,10 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
   const [form, setForm] = useState(null);
 
   const quick = useQuickWorkFlow({ state, updateState, currentUser, department: "Temizlik" });
+  // bkz. Teknik.jsx'teki aynı not — varlık QR'ı okutulunca buraya assetScan
+  // deep link'i düşer.
+  const [assetScan, setAssetScan] = useState(null);
+  const [focusPointId, setFocusPointId] = useState(null);
   // Ana Sayfa'daki departman kısayollarından (bkz. Dashboard.jsx) gelirse
   // deepLink.tab hangi sekmeye gidileceğini belirtir. "quickRequest"/
   // "startTask" — bkz. mobile/create/QuickWorkFlow.jsx'teki not — BURADA
@@ -32,6 +38,12 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (!deepLink || deepLink.department !== "Temizlik") return;
     if (deepLink.action === "quickRequest") { quick.start({ mode: "ariza" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
+    if (deepLink.action === "assetScan") {
+      setTab("mahal");
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      onConsumeDeepLink();
+      return;
+    }
     setTab(deepLink.tab || "mahal");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink]);
@@ -69,7 +81,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
+      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
 
       {tab === "gorevler" && (
         mobileMode ? (
@@ -87,6 +99,14 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
       )}
 
       <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
+      <AssetScanSheet assetScan={assetScan} asset={state.assets.find((a) => a.id === assetScan?.assetId)}
+        onClose={() => setAssetScan(null)}
+        onStartCheck={() => { setFocusPointId(assetScan.matchedPointId); setAssetScan(null); }}
+        onStartFault={() => {
+          const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          setAssetScan(null);
+        }} />
     </div>
   );
 }

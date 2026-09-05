@@ -25,12 +25,16 @@ export function useQuickWorkFlow({ state, updateState, currentUser, department }
   const [form, setForm] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  function start({ source, mode = "ariza" } = {}) {
-    const sourceLabel = source ? `${source.point.name}${source.location ? ` — ${source.location.label}` : ""}` : "";
+  // `assetId`/`assetName` — QR ile bir varlık okutulup "Arıza Kaydı Aç"
+  // seçildiğinde (bkz. components/AssetScanSheet.jsx) dolduruluyor; oluşan
+  // task'a assetId olarak geçiyor (mockData.js'teki tasks[].assetId ile AYNI
+  // alan — Varlıklar detayındaki "Bağlı Görevler" listesi bunu zaten okuyor).
+  function start({ source, mode = "ariza", assetId = null, assetName = null } = {}) {
+    const sourceLabel = source ? `${source.point.name}${source.location ? ` — ${source.location.label}` : ""}` : assetName || "";
     setForm({
       department, issueType: mode === "gorev" ? "Görev" : "Şikayet", priority: "Orta", status: "Yapılacak", description: "",
       requester: currentUser || "", assignee: "", dueDate: "", location: sourceLabel, hasPhoto: false, photoFile: null,
-      mode, selfDo: mode === "gorev",
+      mode, selfDo: mode === "gorev", assetId, assetName,
     });
     setOpen(true);
     setStep(sourceLabel ? "departman" : "kat");
