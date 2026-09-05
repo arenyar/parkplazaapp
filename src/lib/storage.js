@@ -1,18 +1,17 @@
-import { db } from "../firebase.js";
-import { doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
+import { db, storage } from "../firebase.js";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
-// Firebase Storage'ı açmak bu projede Google'ın ücretli Blaze planına
-// geçmeyi (kart eklemeyi) gerektiriyor — kullanıcı bunu açamadı ("hesap
-// açamadım"). Bu yüzden fotoğraf/imza verisi Storage yerine, zaten
-// kullanılan (ücretsiz) Firestore'da AYRI ve KÜÇÜK belgelerde tutuluyor
-// (appdata/pp_photo_*) — tek büyük state dokümanının İÇİNE değil. Sebep:
-// (1) Firestore'un 1 MB doküman sınırı, (2) tüm istemciler state
-// dokümanını her senkronda TAMAMEN indiriyor — fotoğraflar oraya
-// gömülseydi her sayfa açılışında TÜM geçmiş fotoğraflar inerdi. state'e
-// sadece bu ayrı belgenin KİMLİĞİ (ör. "pp_photo_mahal-fotograflari_...")
-// yazılır ("photoUrl"/"signature" alanı artık gerçek bir URL değil, bir
-// referans) — görüntülenirken StoredImage bileşeni bu kimlikle belgeyi
-// ayrıca çeker (bkz. src/components/StoredImage.jsx).
+// Kullanıcı teyidiyle: "gs://parkplaza-451fa.firebasestorage.app açtım
+// android için ses ve fotoğraflar için bu alanı kullanabilirsin" — daha
+// önce (Storage'ın ücretli Blaze planı gerektirdiği, kullanıcının hesap
+// açamadığı bir dönemde) fotoğraf/imza verisi Firestore'da ayrı küçük
+// belgelerde (appdata/pp_photo_*) tutuluyordu. Artık gerçek Storage
+// kullanılabildiği için yeni yüklemeler doğrudan oraya gidiyor — daha
+// büyük dosya, gerçek CDN önbelleği, Firestore'un 1 MB doküman sınırından
+// bağımsız. ESKİ `pp_photo_*` referanslı kayıtlar hâlâ okunabiliyor
+// (fetchPhoto geriye dönük dal) — geçmiş veri kaybolmadı, sadece BUNDAN
+// SONRAKİ yüklemeler Storage'a gidiyor.
 export function resizeImage(file, maxDim = 1100, quality = 0.72) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -36,64 +35,58 @@ export function resizeImage(file, maxDim = 1100, quality = 0.72) {
   });
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Görsel okunamadı"));
-    reader.readAsDataURL(blob);
-  });
-}
-
 function uniqueId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Firestore doküman sınırı 1 MB — base64 kodlaması boyutu ~%33 büyüttüğü
-// için 900 KB'de güvenlik payı bırakıyoruz.
-const MAX_DATA_URL_LENGTH = 900_000;
-
-async function savePhotoDoc(dataUrl, pathPrefix) {
-  if (dataUrl.length > MAX_DATA_URL_LENGTH) {
-    throw new Error("Fotoğraf çok büyük — lütfen daha düşük çözünürlüklü bir fotoğraf deneyin.");
-  }
-  const id = `pp_photo_${pathPrefix}_${uniqueId()}`;
-  await setDoc(doc(db, "appdata", id), { dataUrl, createdAt: new Date().toISOString() });
-  return id;
+async function uploadBlob(blob, pathPrefix, ext) {
+  const path = `photos/${pathPrefix}/${uniqueId()}.${ext}`;
+  await uploadBytes(ref(storage, path), blob);
+  return path;
 }
 
-// Bir <input type="file"> File'ını küçültüp Firestore'a ayrı bir belge
-// olarak kaydeder, o belgenin referans kimliğini döner. `pathPrefix`: ör.
-// "mahal-fotograflari", "gorev-fotograflari".
+// Bir <input type="file"> File'ını küçültüp Storage'a yükler, oradaki YOLU
+// (path — gerçek indirme URL'i değil, bkz. fetchPhoto notu) döner.
+// `pathPrefix`: ör. "mahal-fotograflari", "gorev-fotograflari".
 export async function uploadPhoto(file, pathPrefix) {
   const blob = await resizeImage(file);
-  const dataUrl = await blobToDataUrl(blob);
-  return savePhotoDoc(dataUrl, pathPrefix);
+  return uploadBlob(blob, pathPrefix, "jpg");
 }
 
-// SignaturePad'in ürettiği base64 PNG data URL'ini ayrı bir belgeye
-// kaydeder, referans kimliğini döner.
+// SignaturePad'in ürettiği base64 PNG data URL'ini Storage'a yükler, o
+// dosyanın yolunu döner.
 export async function uploadDataUrl(dataUrl, pathPrefix) {
-  return savePhotoDoc(dataUrl, pathPrefix);
+  const blob = await (await fetch(dataUrl)).blob();
+  return uploadBlob(blob, pathPrefix, "png");
 }
 
-// StoredImage bileşeni için: bir referans kimliğini gerçek data URL'e
-// çevirir. Geriye dönük uyumluluk: eski kayıtlarda `photoUrl`/`signature`
-// zaten bir data:/http URL'i olabilir (Storage denemesinden kalma ya da
-// SignaturePad'in ham çıktısı) — bu durumda olduğu gibi döner, ayrıca
-// Firestore'a gitmez.
-export async function fetchPhoto(ref) {
-  if (!ref) return null;
-  if (ref.startsWith("data:") || ref.startsWith("http")) return ref;
-  const snap = await getDoc(doc(db, "appdata", ref));
-  return snap.exists() ? snap.data().dataUrl : null;
+// StoredImage bileşeni için: bir referansı gerçek, görüntülenebilir bir
+// URL'e çevirir. Üç olası biçim: (1) YENİ — bir Storage yolu (ör.
+// "photos/mahal-fotograflari/..."), getDownloadURL ile çözülür; (2) ESKİ —
+// "pp_photo_*" ile başlayan bir Firestore belge kimliği, geriye dönük
+// olarak oradan okunur; (3) EN ESKİ — zaten bir data:/http URL'i (çok eski
+// bir kayıt ya da SignaturePad'in ham çıktısı), olduğu gibi döner.
+export async function fetchPhoto(refValue) {
+  if (!refValue) return null;
+  if (refValue.startsWith("data:") || refValue.startsWith("http")) return refValue;
+  if (refValue.startsWith("pp_photo_")) {
+    const snap = await getDoc(doc(db, "appdata", refValue));
+    return snap.exists() ? snap.data().dataUrl : null;
+  }
+  try {
+    return await getDownloadURL(ref(storage, refValue));
+  } catch (err) {
+    console.error("Storage'dan görsel alınamadı:", err);
+    return null;
+  }
 }
 
 // Faz 15 — profil fotoğrafı değiştiğinde eskisi silinir, birikmez (spec).
-// Eski referans data:/http (eski/geriye dönük bir kayıt) ise ya da hiç
-// yoksa sessizce hiçbir şey yapmaz — sadece bu depoda GERÇEKTEN kendi
-// oluşturduğumuz `pp_photo_*` belgeleri silinir.
-export async function deletePhoto(ref) {
-  if (!ref || ref.startsWith("data:") || ref.startsWith("http")) return;
-  try { await deleteDoc(doc(db, "appdata", ref)); } catch { /* zaten silinmiş/erişilemez olabilir — sessizce geç */ }
+// data:/http (çok eski/geriye dönük bir kayıt) ise hiçbir şey yapmaz.
+export async function deletePhoto(refValue) {
+  if (!refValue || refValue.startsWith("data:") || refValue.startsWith("http")) return;
+  try {
+    if (refValue.startsWith("pp_photo_")) await deleteDoc(doc(db, "appdata", refValue));
+    else await deleteObject(ref(storage, refValue));
+  } catch { /* zaten silinmiş/erişilemez olabilir — sessizce geç */ }
 }

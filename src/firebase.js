@@ -1,6 +1,7 @@
 import { initializeApp, deleteApp } from "firebase/app";
 import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, createUserWithEmailAndPassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 import { showToast } from "./lib/toast.js";
 
 // Kullanıcı teyidiyle: "yine aynı klasörde firebase bağlantısını yap" —
@@ -51,6 +52,14 @@ try {
 }
 export const db = firestoreDb;
 export const auth = getAuth(app);
+// Kullanıcı teyidiyle: "gs://parkplaza-451fa.firebasestorage.app açtım
+// android için ses ve fotoğraflar için bu alanı kullanabilirsin" —
+// firebaseConfig'teki storageBucket zaten bu bucket'ı gösteriyordu (Storage
+// açılmadan önce de proje ayarında vardı, sadece kullanılamıyordu). Artık
+// gerçek Storage kullanılabildiği için fotoğraf/imza için Firestore'a küçük
+// ayrı belgeler yazma workaround'u (bkz. lib/storage.js'teki eski not)
+// KALDIRILDI — yeni yüklemeler doğrudan buraya gider.
+export const storage = getStorage(app);
 
 // Kullanıcı teyidiyle bulunan sorun: "veritabanı tamamen açık... database
 // güvenliğini uçtan uca kontrol etmelisin" — giriş artık gerçek Firebase
