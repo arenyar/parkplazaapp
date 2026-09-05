@@ -4,10 +4,11 @@
 // aynı GEMINI_API_KEY ortam değişkeni, aynı desen). Anahtar burada da
 // istemciye ASLA gitmez.
 //
-// Kullanıcı teyidiyle: "faz 3 başla" — AI checklist motorunun BACKEND
-// kısmı. Sohbet arayüzü (Faz 4) ve fotoğraf/vision (Faz 5) henüz YOK; bu
-// fonksiyon sadece "soru sor / sonuçlandır" turlarını üretir. Faz 4 bu
-// fonksiyonu çağıran bir arayüz kuracak.
+// Kullanıcı teyidiyle: "faz 3/4/5 başla" — AI checklist motorunun BACKEND
+// kısmı. Faz 5: istemci (bkz. mobile/checklist/AiChecklistChat.jsx)
+// isteğe bağlı `photoBase64`/`photoMimeType` gönderebilir — Gemini'nin
+// çok-modlu (vision) girdisi olarak metnin yanına eklenir (bkz.
+// src/lib/aiChecklistPrompt.js buildGeminiRequestBody).
 //
 // Prompt/şema/model mantığı src/lib/aiChecklistPrompt.js'te — kullanıcı
 // teyidiyle "Netlify kredisi yok, localde test edecek şekilde yapalım":
@@ -30,7 +31,7 @@ export async function handler(event) {
   } catch {
     return { statusCode: 400, body: JSON.stringify({ error: "Geçersiz istek gövdesi." }) };
   }
-  const { assetContext, questions, history, turnCount } = body;
+  const { assetContext, questions, history, turnCount, photoBase64, photoMimeType } = body;
   if (!assetContext || !Array.isArray(questions) || questions.length === 0) {
     return { statusCode: 400, body: JSON.stringify({ error: "assetContext ve questions zorunlu." }) };
   }
@@ -40,11 +41,12 @@ export async function handler(event) {
   }
 
   const prompt = buildSystemPrompt({ assetContext, questions, history: history || [] });
+  const photo = photoBase64 ? { base64: photoBase64, mimeType: photoMimeType } : null;
 
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildGeminiRequestBody(prompt)) }
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildGeminiRequestBody(prompt, photo)) }
     );
     const data = await res.json();
     if (!res.ok) {

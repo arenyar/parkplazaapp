@@ -45,6 +45,25 @@ async function uploadBlob(blob, pathPrefix, ext) {
   return path;
 }
 
+// Faz 5 (AI checklist fotoğraf/vision) — zaten küçültülmüş bir blob'u
+// TEKRAR küçültmeden doğrudan yükler; `uploadPhoto`'nun aksine blob'u
+// çağırana da geri verir ki AYNI görsel hem Storage'a gitsin hem Gemini'ye
+// (bkz. blobToBase64) — iki kez resize/okuma yapılmasın.
+export async function uploadResizedBlob(blob, pathPrefix) {
+  return uploadBlob(blob, pathPrefix, "jpg");
+}
+
+// Bir Blob'u Gemini'nin `inline_data.data` alanının beklediği ham (data:
+// ön eki OLMADAN) base64 metnine çevirir.
+export function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(new Error("Görsel base64'e çevrilemedi"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 // Bir <input type="file"> File'ını küçültüp Storage'a yükler, oradaki YOLU
 // (path — gerçek indirme URL'i değil, bkz. fetchPhoto notu) döner.
 // `pathPrefix`: ör. "mahal-fotograflari", "gorev-fotograflari".

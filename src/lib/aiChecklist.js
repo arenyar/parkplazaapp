@@ -17,7 +17,11 @@ export const AI_CHECKLIST_LIMITS = {
 // düşüş" (madde 2) — bu fonksiyon hata/timeout/kota durumunda İSTİSNA
 // FIRLATIR, çağıran (Faz 4'teki arayüz) bunu yakalayıp klasik moda düşer;
 // burada sessizce yutulmaz.
-export async function requestAiChecklistTurn({ assetContext, questions, history, turnCount }) {
+// `photoBase64`/`photoMimeType` — Faz 5 (fotoğraf/vision), opsiyonel.
+// Oturum başına en fazla `maxPhotosPerSession` — bu sınır burada DEĞİL,
+// çağıran arayüzde (bkz. AiChecklistChat.jsx photoCount) uygulanır çünkü
+// bu fonksiyon oturum durumunu bilmiyor.
+export async function requestAiChecklistTurn({ assetContext, questions, history, turnCount, photoBase64, photoMimeType }) {
   if (turnCount >= AI_CHECKLIST_LIMITS.maxTurns) {
     return { action: "finalize", diagnosis: { summary: "Tur sınırına ulaşıldı, sonuçlandırıldı.", severity: "takip", confidence: 0.3 }, coverage: { answered: history.length, total: questions.length } };
   }
@@ -27,7 +31,7 @@ export async function requestAiChecklistTurn({ assetContext, questions, history,
     const res = await fetch("/.netlify/functions/ai-checklist-turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assetContext, questions, history, turnCount }),
+      body: JSON.stringify({ assetContext, questions, history, turnCount, photoBase64, photoMimeType }),
       signal: controller.signal,
     });
     const data = await res.json();

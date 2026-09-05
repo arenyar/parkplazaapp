@@ -57,4 +57,17 @@ test("Gemini istek gövdesi structured output (responseMimeType+responseSchema) 
   assert.equal(req.generationConfig.responseMimeType, "application/json");
   assert.equal(req.generationConfig.responseSchema, RESPONSE_SCHEMA);
   assert.equal(req.contents[0].parts[0].text, "test prompt");
+  assert.equal(req.contents[0].parts.length, 1, "fotoğraf verilmezse tek part (metin)");
+});
+
+test("Faz 5 — fotoğraf verilince Gemini isteğine inline_data eklenir (vision)", () => {
+  const req = buildGeminiRequestBody("test prompt", { base64: "ZmFrZQ==", mimeType: "image/jpeg" });
+  assert.equal(req.contents[0].parts.length, 2);
+  assert.equal(req.contents[0].parts[1].inline_data.mime_type, "image/jpeg");
+  assert.equal(req.contents[0].parts[1].inline_data.data, "ZmFrZQ==");
+});
+
+test("promptta fotoğraf kısıtı (en fazla 3, sadece gerekliyse) belirtilir", () => {
+  const prompt = buildSystemPrompt({ assetContext: ASSET, questions: QUESTIONS, history: [] });
+  assert.ok(/en fazla 3 fotoğraf/i.test(prompt));
 });

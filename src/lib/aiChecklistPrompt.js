@@ -85,16 +85,21 @@ KISITLAR:
 - Güvenlik riski (gaz, elektrik, yüksekte çalışma) sezersen soruyu kes, severity:"acil" ile sonuçlandır.
 - YASAK: görev kapatma, kayıt silme, maliyet taahhüdü, personel değerlendirmesi — bunlar senin işin değil, sadece öneri/teşhis üret.
 - Şablondaki tüm maddeler cevaplandıysa ve anormallik yoksa action:"finalize", severity:"bilgi".
+- Fotoğraf (Faz 5): SADECE görsel doğrulama gerçekten teşhisi değiştirecekse action:"request_photo" iste — oturum başına en fazla 3 fotoğraf var, gereksiz yere isteme. Bir fotoğraf bu mesaja EKLENMİŞSE onu değerlendirip normal şekilde bir sonraki adıma (ask/finalize) geç, tekrar isteme.
 
 Şimdi sıradaki adımı JSON şemasına uygun döndür.`;
 }
 
 // Gemini'nin generateContent istek gövdesi — hem gerçek fetch (Netlify
 // function) hem yerel test scripti (bkz. scripts/test-ai-checklist-turn.mjs)
-// AYNI gövdeyi üretsin diye tek yerde.
-export function buildGeminiRequestBody(prompt) {
+// AYNI gövdeyi üretsin diye tek yerde. `photo` verilirse (Faz 5 — vision)
+// `{ base64, mimeType }` şeklinde, resim inline_data olarak metnin
+// YANINA eklenir — Gemini'nin çok-modlu (multimodal) girdi biçimi budur.
+export function buildGeminiRequestBody(prompt, photo) {
+  const parts = [{ text: prompt }];
+  if (photo?.base64) parts.push({ inline_data: { mime_type: photo.mimeType || "image/jpeg", data: photo.base64 } });
   return {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA },
   };
 }

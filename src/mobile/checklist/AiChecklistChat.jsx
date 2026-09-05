@@ -1,20 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Sparkles, ShieldAlert } from "lucide-react";
+import { X, Sparkles, ShieldAlert, Camera } from "lucide-react";
 import { useTheme } from "../../lib/ThemeContext.jsx";
 import { Card, Button, Input } from "../../components/ui.jsx";
 import { FillModal, buildMahalFillPatch, startMahalRun, runFor, resolveMeters } from "../../pages/MahalKontrol.jsx";
 import { requestAiChecklistTurn, computeCoverage, AI_CHECKLIST_LIMITS } from "../../lib/aiChecklist.js";
+import { resizeImage, uploadResizedBlob, blobToBase64 } from "../../lib/storage.js";
 
 const SEVERITY_LABEL = { bilgi: "Bilgi", takip: "Takip Gerekli", acil: "ACİL" };
 const SEVERITY_COLOR = { bilgi: "#3FB37F", takip: "#E0B354", acil: "#DC5A34" };
 
-// Faz 4 — AI-CHECKLIST-PROJESI.md §6 (Klasik mod ve geri düşüş) + §7 (AI
-// kontrol ekranı). Kullanıcı teyidiyle "faz 4 geç". Vazgeçilmez kural 1-2:
-// klasik mod SİLİNMEZ, AI oturumu HER ZAMAN klasik forma (aynı FillModal,
-// aynı buildMahalFillPatch — bkz. pages/MahalKontrol.jsx) düşebilir; kalıcı
+// Faz 4+5 — AI-CHECKLIST-PROJESI.md §6 (Klasik mod ve geri düşüş) + §7 (AI
+// kontrol ekranı) + §5.6 (fotoğraf akışı). Vazgeçilmez kural 1-2: klasik mod
+// SİLİNMEZ, AI oturumu HER ZAMAN klasik forma (aynı FillModal, aynı
+// buildMahalFillPatch — bkz. pages/MahalKontrol.jsx) düşebilir; kalıcı
 // "Klasik Forma Geç" düğmesi + otomatik düşüş (hata/timeout/kapsam
-// sağlanamıyor) burada uygulanıyor. Fotoğraf/vision (Faz 5) henüz yok —
-// AI "request_photo" derse de güvenli şekilde klasik moda düşülür.
+// sağlanamıyor) burada uygulanıyor. Fotoğraf: en fazla 3/oturum (bkz.
+// lib/aiChecklist.js AI_CHECKLIST_LIMITS) — aynı görsel HEM Storage'a
+// (klasik moddaki "mahal-fotograflari" prefix'iyle, run.photoUrl olarak
+// AYNI yere) HEM Gemini'ye (inline base64, vision) gider — tek resize.
 export function AiChecklistChat({ state, updateState, currentUser, point, location, department, asset, onClose }) {
   const T = useTheme();
   const questions = location?.questions || point.questions;
@@ -25,6 +28,9 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   const [loading, setLoading] = useState(true);
   const [fallbackNotice, setFallbackNotice] = useState(null);
   const [draft, setDraft] = useState("");
+  const [photoCount, setPhotoCount] = useState(0);
+  const [sessionPhotoUrl, setSessionPhotoUrl] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const startedAtRef = useRef(Date.now());
   const startedRunRef = useRef(false);
 
@@ -34,7 +40,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     if (startedRunRef.current) return;
     startedRunRef.current = true;
     updateState(startMahalRun(state, point, location, currentUser));
-    runTurn([], 0);
+    runTurn([], 0, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -43,7 +49,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     setMode("classic");
   }
 
-  async function runTurn(nextHistory, nextTurnCount) {
+  async function runTurn(nextHistory, nextTurnCount, photo) {
     setLoading(true);
     if (Date.now() - startedAtRef.current > AI_CHECKLIST_LIMITS.sessionTimeoutMs) {
       fallbackToClassic("Oturum süresi doldu.");
@@ -55,10 +61,14 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     }
     try {
       const assetContext = { manufacturer: asset?.manufacturer, model: asset?.model, category: asset?.category, criticality: asset?.criticality, floorLabel: point.floorLabel };
-      const turn = await requestAiChecklistTurn({ assetContext, questions, history: nextHistory, turnCount: nextTurnCount });
+      const turn = await requestAiChecklistTurn({ assetContext, questions, history: nextHistory, turnCount: nextTurnCount, photoBase64: photo?.base64, photoMimeType: photo?.mimeType });
       if (turn.action === "request_photo") {
-        // Faz 5 (fotoğraf/vision) henüz yok — güvenli şekilde klasik moda düş.
-        fallbackToClassic("Bu madde için fotoğraf gerekiyor — klasik formda devam edin.");
+        if (photoCount >= AI_CHECKLIST_LIMITS.maxPhotosPerSession) {
+          fallbackToClassic("Fotoğraf sınırına ulaşıldı — klasik formda devam edin.");
+          return;
+        }
+        setCurrent(turn);
+        setLoading(false);
         return;
       }
       if (turn.action === "finalize") {
@@ -90,7 +100,31 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     setTurnCount(nextTurnCount);
     setDraft("");
     if (nextTurnCount >= AI_CHECKLIST_LIMITS.maxTurns) { fallbackToClassic("Tur sınırına ulaşıldı."); return; }
-    runTurn(nextHistory, nextTurnCount);
+    runTurn(nextHistory, nextTurnCount, null);
+  }
+
+  // Aynı seçilen dosyayı TEK sefer küçültüp hem Storage'a (kalıcı kayıt,
+  // klasik moddakiyle aynı yere) hem Gemini'ye (base64, vision) gönderir.
+  async function handlePhotoSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const blob = await resizeImage(file);
+      const [path, base64] = await Promise.all([uploadResizedBlob(blob, "mahal-fotograflari"), blobToBase64(blob)]);
+      setSessionPhotoUrl(path);
+      const nextPhotoCount = photoCount + 1;
+      const nextTurnCount = turnCount + 1;
+      setPhotoCount(nextPhotoCount);
+      setTurnCount(nextTurnCount);
+      if (nextTurnCount >= AI_CHECKLIST_LIMITS.maxTurns) { fallbackToClassic("Tur sınırına ulaşıldı."); return; }
+      await runTurn(history, nextTurnCount, { base64, mimeType: "image/jpeg" });
+    } catch (err) {
+      console.error("Fotoğraf işlenemedi:", err);
+      fallbackToClassic("Fotoğraf yüklenemedi.");
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   function buildInitialAnswersForClassic() {
@@ -100,11 +134,13 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   }
 
   // AI onaylanınca AYNI buildMahalFillPatch (klasik modun kullandığı) ile
-  // yazılır — "Aynı sonuç şemasına yazar" kuralı (madde 1).
+  // yazılır — "Aynı sonuç şemasına yazar" kuralı (madde 1). Oturumda bir
+  // fotoğraf çekildiyse (sessionPhotoUrl) o da klasik modla AYNI alana
+  // (run.photoUrl) bağlanır.
   function submitFillFromAi() {
     const answers = buildInitialAnswersForClassic();
     const note = current?.diagnosis?.summary || "";
-    let patch = buildMahalFillPatch(state, point, location, { inspector: currentUser, answers, note, startedAt: new Date().toISOString() });
+    let patch = buildMahalFillPatch(state, point, location, { inspector: currentUser, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
     if (patch.mahalRuns) {
       patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (location?.key || null) ? { ...r, verifiedBy: "qr", aiAssisted: true } : r)) };
     }
@@ -140,13 +176,13 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
             </div>
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex" }}><X size={18} /></button>
           </div>
-          <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>Soru {turnCount + 1} · yapay zeka destekli kontrol</div>
+          <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>Soru {turnCount + 1} · yapay zeka destekli kontrol{sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}</div>
 
           {fallbackNotice && <div style={{ fontSize: 11.5, color: "#DC5A34", marginBottom: 8 }}>{fallbackNotice}</div>}
 
-          {loading && <p style={{ fontSize: 13, color: T.dim }}>Yapay zeka düşünüyor…</p>}
+          {(loading || uploadingPhoto) && <p style={{ fontSize: 13, color: T.dim }}>{uploadingPhoto ? "Fotoğraf yükleniyor…" : "Yapay zeka düşünüyor…"}</p>}
 
-          {!loading && current?.action === "ask" && current.question && (
+          {!loading && !uploadingPhoto && current?.action === "ask" && current.question && (
             <>
               <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{current.question.text}</p>
               {current.question.type === "bool" ? (
@@ -168,7 +204,18 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
             </>
           )}
 
-          {!loading && current?.action === "finalize" && (
+          {!loading && !uploadingPhoto && current?.action === "request_photo" && (
+            <>
+              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{current.question?.text || "Görsel doğrulama için bir fotoğraf ekleyin."}</p>
+              <p style={{ fontSize: 11, color: T.dimmer, marginBottom: 10 }}>{current.question?.why}</p>
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1px dashed ${T.line}`, borderRadius: 10, padding: "16px 12px", cursor: "pointer", color: T.dim, fontSize: 13 }}>
+                <Camera size={16} /> Fotoğraf çek / seç
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelected} style={{ display: "none" }} />
+              </label>
+            </>
+          )}
+
+          {!loading && !uploadingPhoto && current?.action === "finalize" && (
             <div>
               <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: SEVERITY_COLOR[current.diagnosis?.severity] || T.dim, background: `${SEVERITY_COLOR[current.diagnosis?.severity] || T.dim}22`, borderRadius: 999, padding: "3px 10px", marginBottom: 8 }}>
                 {SEVERITY_LABEL[current.diagnosis?.severity] || "Sonuç"}
