@@ -750,9 +750,54 @@ function genGuvenlikTurLocations() {
   return [...katItems, ...otoparkItems];
 }
 
+// Kullanıcı teyidiyle: "Teknikteki mahal kontrol sorularına panolarıda ekle
+// ... örnek Chiller 1 Pano kontrolü gibi sorular basit Pano görünümü, koku,
+// ses, ısınma, alarm/trip, erişim gibi. Birde tüm panolar için aylık bir
+// pano kontrolü yapacağız bu detaylı olacak Detaylı pano kontrolü + termal
+// kamera + bağlantı/ısınma değerlendirmesi gibi. bu ortak alandaki panolar
+// için geçerli." — iki ayrı periyot, aynı pano listesi: haftalık BASİT
+// (görsel/duyusal) + aylık DETAYLI (+ termal kamera + bağlantı/ısınma).
+// Floor/side sadece GERÇEKTEN bilinen eşleşmeler için verildi (ör. Jeneratör
+// Çıkış Panosu → 4B, aynı mtw2 jeneratörünün yanı) — emin olunmayanlar
+// (Ana Dağıtım, Soğutma Kulesi, Kat Elektrik Panoları) floorLabel:null,
+// uydurma bir kat atanmadı; admin Ayarlar'dan ileride netleştirebilir.
+const PANO_BASIT_SORULARI = [
+  { text: "Pano görünümü normal mi (hasar/kir/pas yok)?", failOn: "Hayır" },
+  { text: "Anormal koku yok mu?", failOn: "Hayır" },
+  { text: "Anormal ses yok mu?", failOn: "Hayır" },
+  { text: "Aşırı ısınma yok mu?", failOn: "Hayır" },
+  { text: "Alarm/Trip durumu yok mu?", failOn: "Hayır" },
+  { text: "Erişim engelsiz mi?", failOn: "Hayır" },
+];
+const PANO_DETAYLI_SORULARI = [
+  ...PANO_BASIT_SORULARI,
+  { text: "Termal kamera taramasında anormal bir sıcaklık farkı yok mu?", failOn: "Hayır" },
+  { text: "Bağlantı noktaları sıkı, gevşeklik/renk değişimi yok mu?", failOn: "Hayır" },
+];
+const PANO_LISTESI = [
+  { id: "ep01", name: "EP-01 Ana Dağıtım Panosu", floorLabel: null },
+  { id: "ep02", name: "EP-02 Jeneratör Çıkış Panosu", floorLabel: "4B", side: "Beşiktaş" },
+  { id: "ep03", name: "EP-03 Chiller Panosu", floorLabel: "3B", side: "Sarıyer" },
+  { id: "ep04", name: "EP-04 Soğutma Kulesi Panosu", floorLabel: "ÇATI1" },
+  { id: "ep05", name: "EP-05 Hidrofor Panosu", floorLabel: "5", side: "Beşiktaş" },
+  { id: "ep06", name: "EP-06 Yangın Pompa Panosu", floorLabel: "3B", side: "Sarıyer" },
+  { id: "ep07", name: "EP-07 Kat Elektrik Panosu - 1", floorLabel: null },
+  { id: "ep08", name: "EP-08 Kat Elektrik Panosu - 2", floorLabel: null },
+];
+const TEKNIK_PANO_HAFTALIK = PANO_LISTESI.map((p) => ({
+  id: `mtp_w_${p.id}`, department: "Teknik", role: "Elektrik", name: p.name, assetId: "", floorLabel: p.floorLabel, side: p.side || null,
+  assetDesc: "Ortak alan elektrik panosu — basit görsel/duyusal kontrol", period: "Haftalık", questions: PANO_BASIT_SORULARI,
+}));
+const TEKNIK_PANO_AYLIK = PANO_LISTESI.map((p) => ({
+  id: `mtp_m_${p.id}`, department: "Teknik", role: "Elektrik", name: `${p.name} — Aylık Detaylı Kontrol`, assetId: "", floorLabel: p.floorLabel, side: p.side || null,
+  assetDesc: "Detaylı pano kontrolü + termal kamera + bağlantı/ısınma değerlendirmesi", period: "Aylık", questions: PANO_DETAYLI_SORULARI,
+}));
+
 export const MAHAL_POINTS = [
   ...TEKNIK_MEKANIK_GUNLUK,
   ...TEKNIK_MEKANIK_HAFTALIK,
+  ...TEKNIK_PANO_HAFTALIK,
+  ...TEKNIK_PANO_AYLIK,
   ...TEKNIK_AYLIK_PERFLOOR,
   // ---- TEMİZLİK — TEK mahal kontrolü, çok konum — kullanıcı teyidiyle:
   // "Temizliğin Mahal kontrolü tek olacak. ayrı yaptığın mahalleri tek
@@ -1225,6 +1270,18 @@ export function migrateLegacyState(state) {
       const points = [...next.mahalPoints];
       points[idx] = { ...points[idx], shifts: DEFAULT_GUVENLIK_SHIFTS };
       next = { ...next, mahalPoints: points };
+    }
+  }
+  // Kullanıcı teyidiyle eklenen "Pano kontrolleri" (EP-01..EP-08, haftalık
+  // basit + aylık detaylı) — canlı Firestore'daki mahalPoints seed
+  // sabitinden çoktan ayrışmış olduğu için sadece MAHAL_POINTS'i güncellemek
+  // mevcut kurulumlara hiçbir şey kazandırmaz; burada eksik olan yeni
+  // noktalar id'ye göre (tekrar eklenmesin diye) bir kereye mahsus eklenir.
+  if (Array.isArray(next.mahalPoints)) {
+    const existingIds = new Set(next.mahalPoints.map((p) => p.id));
+    const missingPanoPoints = [...TEKNIK_PANO_HAFTALIK, ...TEKNIK_PANO_AYLIK].filter((p) => !existingIds.has(p.id));
+    if (missingPanoPoints.length > 0) {
+      next = { ...next, mahalPoints: [...next.mahalPoints, ...missingPanoPoints] };
     }
   }
   // Güvenlik ağı: newUnitId()'nin modül içi sayacı sayfa yenilendiğinde
