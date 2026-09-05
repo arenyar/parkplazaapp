@@ -119,7 +119,7 @@ function renderScreen(screenKey, p) {
     );
     case "dokumanlar": return <Dokumanlar state={p.state} />;
     case "raporlar": return <Raporlar state={p.state} />;
-    case "ayarlar": return <Ayarlar state={p.state} updateState={p.updateState} canWrite={p.canWrite("ayarlar")} />;
+    case "ayarlar": return <Ayarlar state={p.state} updateState={p.updateState} canWrite={p.canWrite("ayarlar")} currentUser={p.currentUser} />;
     default:
       if (p.activeNavKey === "taslaklar") return <TaslaklarScreen drafts={p.drafts} syncing={p.syncing} onRetry={p.onRetryDraft} onRetryAll={p.onRetryAllDrafts} />;
       if (p.activeNavKey === "personel") return <PersonnelScreen state={p.state} currentUser={p.currentUser} role={p.role} initialPerson={p.personDeepLink} onConsumeInitialPerson={p.onConsumePersonDeepLink} />;

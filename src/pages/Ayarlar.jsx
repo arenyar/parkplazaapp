@@ -147,7 +147,65 @@ function TaskTypesEditor({ state, updateState, canWrite }) {
 // sütun = her bir menü ekranı (bkz. layout/navItems.js NAV_ITEMS — tek
 // kaynak, sidebar'da hangi ekranlar varsa burada da aynı liste); son sütun
 // mobil erişim. Çok satır olduğu için departmana göre filtrelenebilir.
-function UserAccessTable({ state, updateState, canWrite }) {
+// Kullanıcı teyidiyle: "benim dışımdaki personellerin kullanıcı yetkilerini
+// departman bazlı ayarla" — tek tek her personeli işaretlemek yerine, bir
+// departman için bir şablon (hangi ekranlar + mobil) belirlenip o
+// departmandaki HERKESE tek seferde uygulanabiliyor. `currentUser` her zaman
+// hariç tutulur — admin kendi ekranını yanlışlıkla kapatıp kilitlenmesin diye.
+function DeptTemplatePanel({ state, updateState, canWrite, deptFilter, currentUser }) {
+  const T = useTheme();
+  const [template, setTemplate] = useState(() => ({ mobileAccess: false }));
+  const [applied, setApplied] = useState(false);
+
+  function toggle(key) {
+    setTemplate((t) => ({ ...t, [key]: !t[key] }));
+  }
+
+  function apply() {
+    if (!deptFilter) return;
+    const targets = state.team.filter((t) => t.department === deptFilter && t.id !== currentUser?.id);
+    const targetAccountIds = new Set(state.users.filter((u) => targets.some((t) => t.id === u.personnelId)).map((u) => u.id));
+    if (targetAccountIds.size === 0) return;
+    const permissions = {};
+    NAV_ITEMS.forEach((it) => { permissions[it.key] = template[it.key] ? { view: true, read: true, write: true } : { view: false, read: false, write: false }; });
+    updateState({
+      users: state.users.map((u) => (targetAccountIds.has(u.id) ? { ...u, permissions: { ...u.permissions, ...permissions }, mobileAccess: !!template.mobileAccess } : u)),
+    });
+    setApplied(true);
+    setTimeout(() => setApplied(false), 2500);
+  }
+
+  if (!canWrite) return null;
+  const targetCount = state.team.filter((t) => t.department === deptFilter && t.id !== currentUser?.id && state.users.some((u) => u.personnelId === t.id)).length;
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <CardTitle>Departman Bazlı Toplu Ayarla</CardTitle>
+      {!deptFilter ? (
+        <p style={{ fontSize: 12.5, color: T.dim, margin: 0 }}>Toplu şablon uygulamak için yukarıdan önce bir departman seçin.</p>
+      ) : (
+        <>
+          <p style={{ fontSize: 11.5, color: T.dimmer, margin: "0 0 10px" }}>
+            Aşağıda işaretlediğiniz ekranlar/mobil erişim, <b>{deptFilter}</b> departmanındaki (siz hariç) {targetCount} hesaplı personele tek seferde uygulanır. Uygulamadan önce kayıtlı tekil ayarların üzerine yazılacağını unutmayın.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginBottom: 12 }}>
+            {NAV_ITEMS.map((it) => (
+              <label key={it.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.ink, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!template[it.key]} onChange={() => toggle(it.key)} /> {it.label}
+              </label>
+            ))}
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.ink, cursor: "pointer", fontWeight: 700 }}>
+              <input type="checkbox" checked={!!template.mobileAccess} onChange={() => toggle("mobileAccess")} /> <Smartphone size={12} /> Mobil erişim
+            </label>
+          </div>
+          <Button onClick={apply} disabled={targetCount === 0}>{applied ? "Uygulandı ✓" : `${deptFilter} Departmanına Uygula`}</Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function UserAccessTable({ state, updateState, canWrite, currentUser }) {
   const T = useTheme();
   const [deptFilter, setDeptFilter] = useState("");
   const [q, setQ] = useState("");
@@ -202,6 +260,7 @@ function UserAccessTable({ state, updateState, canWrite }) {
           </Select>
         </div>
       </Card>
+      <DeptTemplatePanel state={state} updateState={updateState} canWrite={canWrite} deptFilter={deptFilter} currentUser={currentUser} />
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100 }}>
           <thead>
@@ -266,7 +325,7 @@ function UserAccessTable({ state, updateState, canWrite }) {
 // Kat Planı / Firmalar (malik-kiracı) artık Operasyonlar > Kat Planı sekmesinde
 // yönetiliyor — binanın tüm departmanlarının (Teknik/Temizlik/Güvenlik/Talep-
 // Şikayet) referans aldığı ortak veri olduğu için buradan taşındı.
-export function Ayarlar({ state, updateState, canWrite = true }) {
+export function Ayarlar({ state, updateState, canWrite = true, currentUser }) {
   const T = useTheme();
   const [tab, setTab] = useState("genel");
   function updateBranding(patch) { updateState({ branding: { ...state.branding, ...patch } }); }
@@ -374,7 +433,7 @@ export function Ayarlar({ state, updateState, canWrite = true }) {
         </div>
       )}
 
-      {tab === "yetkilendirme" && <UserAccessTable state={state} updateState={updateState} canWrite={canWrite} />}
+      {tab === "yetkilendirme" && <UserAccessTable state={state} updateState={updateState} canWrite={canWrite} currentUser={currentUser} />}
     </div>
   );
 }

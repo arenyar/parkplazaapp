@@ -355,7 +355,7 @@ export default function App() {
     kpi: <Kpi state={state} />,
     yonetim: <Yonetim state={state} updateState={updateState} canWrite={canWrite("yonetim")} />,
     mobiltasarim: <MobilTasarim state={state} updateState={updateState} />,
-    ayarlar: <Ayarlar state={state} updateState={updateState} canWrite={canWrite("ayarlar")} />,
+    ayarlar: <Ayarlar state={state} updateState={updateState} canWrite={canWrite("ayarlar")} currentUser={currentUser} />,
     duyurular: <Duyurular state={state} updateState={updateState} currentUser={currentUser} role={role} />,
     // Mobildeki <SuggestionsScreen> ile AYNI bileşen (canWrite hiç
     // gönderilmiyor, varsayılan true — mobildeki "herkes öneri verebilir"
