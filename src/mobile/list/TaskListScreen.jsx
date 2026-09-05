@@ -150,7 +150,7 @@ export function TaskListScreen({ state, updateState, currentUserName, scope, pen
           );
         })}
       </div>
-      <ListScreen title={activeScope.title} tasks={scopedTasks} currentUserName={currentUserName} onOpenTask={setDetailTask}
+      <ListScreen title={activeScope.title} tasks={scopedTasks} currentUserName={currentUserName} onOpenTask={setDetailTask} team={state.team}
         groupBy={activeScopeKey === "kiracitalepleri" ? kiraciGroupBy : undefined} />
     </div>
   );

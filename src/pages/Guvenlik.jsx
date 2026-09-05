@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff, AlertTriangle } from "lucide-react";
+import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff, AlertTriangle, ChevronDown, Check } from "lucide-react";
 import { AiEditButton } from "../components/AiEditButton.jsx";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button, Field, Input, Select, TextArea } from "../components/ui.jsx";
@@ -269,9 +269,12 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
           erişilemez hale getirmişti (kullanıcı teyidiyle bulunan hata).
           MahalKontrol'ün "Olay Bildir" hızlı formu bunun YERİNE değil,
           YANINDA — imzalı resmi tutanak hâlâ burada. */}
+      {/* Kullanıcı teyidiyle: "Tüm kısayollardaki görevleri kaldır zaten
+          işlerim alanı açtık" — mobilde "Görevler" sekmesi kaldırıldı, bkz.
+          Teknik.jsx'teki aynı düzeltmenin notu. */}
       {mobileMode && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {[{ key: "mahal", label: "Devriye" }, { key: "devriye", label: "Olaylar" }, { key: "gorevler", label: "Görevler" }].map((tb) => (
+          {[{ key: "mahal", label: "Devriye" }, { key: "devriye", label: "Olaylar" }].map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}
               style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
                 background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>
@@ -466,6 +469,68 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
 // `(i.signatures || [])` boşsa (ya da eski, henüz görsel/imza alanı olmayan
 // bir kayıtsa) HİÇ kutu göstermiyordu; artık SIGNATURE_ROLES'a göre en az
 // boş kutular her zaman basılıyor.
+// DÜZELTME (kullanıcı teyidiyle bulunan hata): "Olay tutanağındaki açıklamayı
+// tam gösterdiğin için ekran bozuluyor" — asıl sebep aslında TAM TERSİ:
+// aşağıdaki `.invoice-print-area` bloğu (190mm'lik SABİT print sayfası)
+// GlobalStyle.jsx'te ekranda HER ZAMAN `display:none` (sadece @media print'te
+// görünür, bkz. Raporlar.jsx'teki aynı desen) — yani bu modal ekranda
+// gösterecek gerçek bir önizlemesi OLMADAN açılıyordu, kullanıcı yarım/boş
+// bir pencere görüyordu. Diğer tüm print ekranları (Raporlar, Mahal Kontrol)
+// ekranda AYRI bir "no-print" önizleme + ayrıca gizli print bloğu kullanıyor;
+// burada o ayrı önizleme hiç yoktu. Aşağıdaki IncidentOnScreenPreview o
+// eksik parçayı ekliyor — telefon genişliğine uyan, sabit mm ölçüsü
+// olmayan bir düzen; uzun açıklama kısaltılıp "Tümünü göster" ile açılıyor.
+// Bu modal her zaman "kağıt" görünümünde (sabit beyaz zemin, bkz. aşağıdaki
+// modal kabuğu) — canlı tema (dark/light) tokenları DEĞİL, dosyanın geri
+// kalanındaki print renkleriyle AYNI sabit palet kullanılıyor (aksi halde
+// karanlık temada metin beyaz zeminde görünmez hale gelirdi).
+function IncidentOnScreenPreview({ i }) {
+  const [expanded, setExpanded] = useState(false);
+  const desc = i.description || "";
+  const isLong = desc.length > 220;
+  const shown = expanded || !isLong ? desc : `${desc.slice(0, 220)}…`;
+  const photoUrls = i.photoUrls && i.photoUrls.length > 0 ? i.photoUrls : (i.photoUrl ? [i.photoUrl] : []);
+  const signatures = i.signatures && i.signatures.length > 0 ? i.signatures : SIGNATURE_ROLES.map((role) => ({ role, name: "", signature: null }));
+  return (
+    <div className="no-print">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: "1 1 140px", fontSize: 13, fontWeight: 700, color: "#132A20" }}>{i.location || "—"}</div>
+        {i.shift && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8a8879", background: "#F4F2EA", borderRadius: 999, padding: "3px 9px" }}>{i.shift}</span>}
+      </div>
+      <div style={{ fontSize: 11.5, color: "#8a8879", marginBottom: 12 }}>
+        {i.tarih ? new Date(i.tarih).toLocaleDateString("tr-TR") : "—"}{i.saat ? ` · ${i.saat}` : ""} · {i.reportedBy || "—"}
+      </div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>Açıklama</div>
+      <p style={{ fontSize: 13, color: "#132A20", whiteSpace: "pre-wrap", margin: "0 0 4px", lineHeight: 1.5 }}>{shown || "—"}</p>
+      {isLong && (
+        <button type="button" onClick={() => setExpanded((s) => !s)}
+          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: "#2E6B4F", marginBottom: 10 }}>
+          {expanded ? "Daha az göster" : "Tümünü göster"} <ChevronDown size={13} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
+        </button>
+      )}
+      {photoUrls.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "6px 0 14px" }}>
+          {photoUrls.map((url, idx) => (
+            <StoredImage key={idx} src={url} alt={`Olay fotoğrafı ${idx + 1}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8, border: "1px solid #E3DFD1" }} />
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8a8879", textTransform: "uppercase", marginBottom: 6 }}>İmzalar</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+        {signatures.map((s, idx) => (
+          <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+            <span style={{ width: 18, height: 18, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: s.signature ? "rgba(78,138,70,0.15)" : "#F4F2EA", color: "#4E8A46" }}>
+              {s.signature ? <Check size={12} /> : null}
+            </span>
+            <span style={{ color: "#8a8879", flexShrink: 0 }}>{s.role}:</span>
+            <span style={{ color: "#132A20", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "—"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IncidentReportView({ incident: i, team, branding, logoUrl, canWrite, onSignatureSaved, onClose }) {
   function print() { setTimeout(() => window.print(), 60); }
   const manager = findDeptManager(team, "Güvenlik");
@@ -520,6 +585,7 @@ function IncidentReportView({ incident: i, team, branding, logoUrl, canWrite, on
         <div className="no-print" style={{ display: "flex", justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#8a8879" }}><X size={18} /></button>
         </div>
+        <IncidentOnScreenPreview i={i} />
         <div className="invoice-print-area">
         <div className="fatura-sayfa" style={pageStyle}>
         <PrintHeader branding={branding} logoUrl={logoUrl} docTitle="OLAY TUTANAĞI" docSubtitle={printDate} />

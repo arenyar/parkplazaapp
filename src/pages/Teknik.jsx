@@ -109,9 +109,14 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
           (bkz. MobileApp.jsx handleNavSelect "bakimtakvimi" deepLink'i, ve
           altta bu sekmenin mobilde masaüstü Bakim.jsx yerine dokunmatik
           MaintenanceScreen'i render etmesi). */}
+      {/* Kullanıcı teyidiyle: "Tüm kısayollardaki görevleri kaldır zaten
+          işlerim alanı açtık... Teknik departman görevler menüsü kalkacak" —
+          mobilde "Görevler" sekmesi kaldırıldı; Ana Sayfa'daki İşlerim/
+          Havuzda Bekleyen İşler kartları (bkz. Dashboard.jsx) + "Görev
+          Başlat" akışı artık aynı işi görüyor, ayrı bir sekmeye gerek yok. */}
       {mobileMode && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "gorevler", label: "Görevler" }, { key: "takvim", label: "Bakım Takvimi" }].map((tb) => (
+          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "takvim", label: "Bakım Takvimi" }].map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}
               style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
                 background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>

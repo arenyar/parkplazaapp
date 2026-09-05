@@ -24,21 +24,23 @@ const LEVEL_META = {
 // Temizlik) hangi sekmeye gidileceğini, `action` varsa orada otomatik
 // açılacak formu belirtir (bkz. App.jsx goToDeptShortcut + o sayfaların
 // deepLink effect'leri).
+// Kullanıcı teyidiyle: "Tüm kısayollardaki görevleri kaldır zaten işlerim
+// alanı açtık" — her üç departmanın "Görevler" kısayolu (departman
+// sayfasındaki artık kaldırılmış mobil Görevler sekmesine gidiyordu)
+// kaldırıldı; Ana Sayfa'daki İşlerim/Havuzda Bekleyen İşler kartları +
+// "Görev Başlat" zaten aynı işlevi görüyor.
 const DEPT_SHORTCUTS = {
   "Teknik": [
-    { key: "gorevler", label: "Görevler", subtitle: "Görevleri yönet", icon: ClipboardList, tab: "gorevler" },
     { key: "mahal", label: "Mahal Kontrol", subtitle: "Mahalleri kontrol et", icon: ClipboardCheck, tab: "mahal" },
     { key: "sayac", label: "Sayaç Okuma", subtitle: "Sayaçları oku", icon: Gauge, tab: "sayacokuma" },
     { key: "ariza", label: "Arıza Kaydı Aç", subtitle: "Arıza bildir ve takip et", icon: AlertTriangle, tab: "mahal", action: "quickRequest" },
   ],
   "Güvenlik": [
-    { key: "gorevler", label: "Görevler", subtitle: "Görevleri yönet", icon: ClipboardList, tab: "gorevler" },
     { key: "devriye", label: "Devriye Turu", subtitle: "Devriye turunu yap", icon: ClipboardCheck, tab: "mahal" },
     { key: "olay", label: "Olay Tutanağı", subtitle: "Tutanak oluştur", icon: FileWarning, tab: "devriye", action: "newIncident" },
     { key: "ariza", label: "Arıza Kaydı Aç", subtitle: "Arıza bildir ve takip et", icon: AlertTriangle, tab: "mahal", action: "quickRequest" },
   ],
   "Temizlik": [
-    { key: "gorevler", label: "Görevler", subtitle: "Temizlik işlerini yönet", icon: ClipboardList, tab: "gorevler" },
     { key: "mahal", label: "Mahal Kontrol", subtitle: "Mahalleri kontrol et", icon: ClipboardCheck, tab: "mahal" },
     { key: "ariza", label: "Arıza Kaydı Aç", subtitle: "Arıza bildir ve takip et", icon: AlertTriangle, tab: "mahal", action: "quickRequest" },
   ],

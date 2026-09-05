@@ -1,5 +1,6 @@
 import { mobileTokens as t } from "../tokens.js";
 import { PRIORITY_COLOR, STATUS_COLOR, initials, actionLabel, placeOf } from "../taskDisplay.js";
+import StoredImage from "../../components/StoredImage.jsx";
 
 // Sözleşme (bkz. mobile-ops-ui SKILL.md): anatomi sırası sabit —
 // 1) avatar 2) başlık 3) öncelik satırı 4) mahal yolu 5) durum 6) ekip + aksiyon.
@@ -15,7 +16,11 @@ function bgForStatus(status) {
   return t.kiremitSoft;
 }
 
-export function RecordCard({ task, onOpen }) {
+// Kullanıcı teyidiyle: "burda personelin ad soyad iconu çıkıyor burda
+// personelin resmi gözükecek" — Personel kartındaki PersonAvatar (bkz.
+// PersonnelWorkBoard.jsx) ile AYNI kaynak (team.photoUrl, StoredImage),
+// fotoğraf yoksa baş harflere düşer.
+export function RecordCard({ task, onOpen, team }) {
   const priorityColor = PRIORITY_COLOR[task.priority] || t.muted;
   const statusColor = STATUS_COLOR[task.status] || t.muted;
   const action = actionLabel(task);
@@ -25,6 +30,8 @@ export function RecordCard({ task, onOpen }) {
   // "+N" rozeti (ilk kişinin baş harfleri zaten görünüyor, kaç kişi daha
   // olduğu da görünür olsun).
   const extraCount = Array.isArray(task.assignees) && task.assignees.length > 1 ? task.assignees.length - 1 : 0;
+  const firstAssignee = task.assignees?.[0] || task.assignee;
+  const person = team?.find((p) => p.name === firstAssignee);
 
   return (
     <button
@@ -35,12 +42,16 @@ export function RecordCard({ task, onOpen }) {
       }}
     >
       <div style={{ position: "relative", flexShrink: 0, marginTop: 2 }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: "50%", background: t.pineSoft, color: t.pine, fontSize: 12, fontWeight: 700,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          {initials(task.assignees?.[0] || task.assignee)}
-        </div>
+        {person?.photoUrl ? (
+          <StoredImage src={person.photoUrl} alt={firstAssignee} style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover" }} />
+        ) : (
+          <div style={{
+            width: 34, height: 34, borderRadius: "50%", background: t.pineSoft, color: t.pine, fontSize: 12, fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {initials(firstAssignee)}
+          </div>
+        )}
         {extraCount > 0 && (
           <span style={{
             position: "absolute", bottom: -3, right: -3, minWidth: 16, height: 16, borderRadius: 8, padding: "0 3px",

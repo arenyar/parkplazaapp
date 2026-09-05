@@ -34,7 +34,7 @@ function defaultSort(list, mode) {
 // davranışı birebir aynı kaldı.
 export function ListScreen({
   title, tasks, items, currentUserName, onOpenTask, onOpenItem,
-  groupBy, renderCard, getAssignee,
+  groupBy, renderCard, getAssignee, team,
   kapsamLabels = ["Tümü", "Bana atananlar"], sortLabels = ["En yeni", "Termine göre"], sortFn,
 }) {
   const list = items || tasks || [];
@@ -49,7 +49,7 @@ export function ListScreen({
   const groupColors = groupBy?.colors || PRIORITY_COLORS;
   const groupSuffix = groupBy?.suffix ?? "öncelik";
   const sort = sortFn || defaultSort;
-  const card = renderCard || ((item, onOpen) => <RecordCard key={item.id} task={item} onOpen={onOpen} />);
+  const card = renderCard || ((item, onOpen) => <RecordCard key={item.id} task={item} onOpen={onOpen} team={team} />);
 
   const [kapsam, setKapsam] = useState(kapsamLabels[0]);
   const [sortMode, setSortMode] = useState(sortLabels[0]);

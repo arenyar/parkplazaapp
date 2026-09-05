@@ -85,5 +85,5 @@ export function DepartmentTaskListScreen({ state, updateState, currentUserName, 
     );
   }
 
-  return <ListScreen title={title} tasks={tasks} currentUserName={currentUserName} onOpenTask={setDetailTask} />;
+  return <ListScreen title={title} tasks={tasks} currentUserName={currentUserName} onOpenTask={setDetailTask} team={state.team} />;
 }
