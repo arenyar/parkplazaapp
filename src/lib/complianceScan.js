@@ -47,8 +47,16 @@ export function runComplianceScan(state) {
   const tasks = (state.tasks || []).filter((t) => !t.archived);
   const maintenance = state.maintenance || [];
 
+  // `assetIds` — kullanıcı teyidiyle: gruplu ekipman (bkz. lib/assetScan.js
+  // aynı not, mockData.js mtd4/mtd5) artık bir noktaya BİRDEN FAZLA varlık
+  // bağlayabiliyor — hepsi "kontrol edilmiş/şablonu var" sayılmalı, sadece
+  // birincil `assetId` değil (aksi halde chiller odasındaki 2. ve 3.
+  // chiller/eşanjörler hâlâ yanlış pozitif "şablonsuz" görünürdü).
   const pointByAsset = new Map();
-  mahalPoints.forEach((p) => { if (p.assetId && !pointByAsset.has(p.assetId)) pointByAsset.set(p.assetId, p); });
+  mahalPoints.forEach((p) => {
+    const ids = p.assetIds && p.assetIds.length > 0 ? p.assetIds : (p.assetId ? [p.assetId] : []);
+    ids.forEach((id) => { if (!pointByAsset.has(id)) pointByAsset.set(id, p); });
+  });
   const maintByAsset = new Set();
   maintenance.forEach((m) => (m.assetIds || []).forEach((id) => maintByAsset.add(id)));
 

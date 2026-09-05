@@ -8,11 +8,19 @@
 // departmanı kullanılır; yoksa "Teknik" varsayılır (ekipmanların büyük
 // çoğunluğu teknik) ama departman seçimi Arıza Kaydı akışında (QuickWorkFlow)
 // zaten değiştirilebilir.
+//
+// `assetIds` — kullanıcı teyidiyle: "chillerlerde sürkülasyon pompalarıda
+// var... birbirine bağlı ekipmanları kontrolü atlamak için" — bir mahal
+// kontrol noktası artık TEK değil BİRDEN FAZLA gerçek varlığı kapsayabilir
+// (bkz. mockData.js mtd4/mtd5, MAINTENANCE_ITEMS'in zaten kullandığı
+// assetId+assetIds deseni). `assetId` geriye dönük uyumluluk için birincil
+// olarak kalıyor, eşleşme artık ikisinde de aranıyor — bir odadaki HERHANGİ
+// bir ekipmanın QR'ı okutulunca AYNI paylaşılan kontrol noktasına düşer.
 export function resolveAssetScan(state, assetId) {
   if (!assetId) return null;
   const asset = (state.assets || []).find((a) => a.id === assetId && !a.archived);
   if (!asset) return null;
-  const point = (state.mahalPoints || []).find((p) => p.assetId === asset.id);
+  const point = (state.mahalPoints || []).find((p) => p.assetId === asset.id || (p.assetIds || []).includes(asset.id));
   return {
     assetId: asset.id,
     assetName: asset.name,

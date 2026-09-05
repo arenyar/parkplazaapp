@@ -590,8 +590,19 @@ const TEKNIK_MEKANIK_GUNLUK = [
     ],
   },
   {
-    id: "mtd4", department: "Teknik", role: "Mekanik", name: "Soğutma Odası (Chiller)", assetId: "PP-034-01", floorLabel: "3B", side: "Sarıyer",
-    assetDesc: "2x York chiller + eşanjörler, sirkülasyon pompaları", period: "Günlük",
+    // Kullanıcı teyidiyle: "chillerlerde sürkülasyon pompalarıda var...
+    // birbirine bağlı ekipmanları kontrolü atlamak için" — bu odanın Kat
+    // Planı'ndaki GERÇEK ekipman listesi (bkz. piramitData.js "Soğutma
+    // Odası"/Sarıyer teknikMahal kaydı) 3 chiller + 3 eşanjör içeriyor,
+    // tek bir chiller değil. `assetId` (birincil, geriye dönük uyumluluk)
+    // yanında MAINTENANCE_ITEMS'in zaten kullandığı AYNI `assetIds` (tam
+    // liste) deseni eklendi — Faz 1 QR taraması ve Faz 7a uygunluk
+    // taraması artık bu odadaki HERHANGİ bir ekipmanın QR'ını/durumunu bu
+    // TEK kontrol noktasına bağlayabiliyor. Sirkülasyon pompaları ayrı bir
+    // varlık kaydına sahip değil (sadece chiller/eşanjör notlarında
+    // "dahildir" olarak geçiyor) — uydurma bir id eklenmedi.
+    id: "mtd4", department: "Teknik", role: "Mekanik", name: "Soğutma Odası (Chiller)", assetId: "PP-034-01", assetIds: ["PP-034-01", "PP-034-02", "PP-038", "PP-035", "PP-036-01", "PP-036-02"], floorLabel: "3B", side: "Sarıyer",
+    assetDesc: "3x York chiller + 3x Alfa Laval eşanjör, sirkülasyon pompaları", period: "Günlük",
     questions: [
       { text: "Chiller çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 6, max: 12 },
       { text: "Kompresör basıncı (bar)", type: "sayi", unit: "bar", min: 4, max: 12 },
@@ -600,8 +611,13 @@ const TEKNIK_MEKANIK_GUNLUK = [
     ],
   },
   {
-    id: "mtd5", department: "Teknik", role: "Mekanik", name: "Hidrofor Odası", assetId: "PP-020", floorLabel: "5", side: "Beşiktaş",
-    assetDesc: "5. Kat Beşiktaş Teknik Mahal içindeki hidrofor seti", period: "Günlük",
+    // Kullanıcı teyidiyle: "hidraforlarda pano var genleşme tankları var" —
+    // bu odadaki hidrofor SETİ (mi28 bakım planının da grupladığı) 3 pompa
+    // içeriyor, tek pompa değil (bkz. mtd4'teki aynı not, MAINTENANCE_ITEMS
+    // deseni). Panosu/genleşme tankı ayrı bir varlık kaydına sahip değil —
+    // uydurma bir id eklenmedi.
+    id: "mtd5", department: "Teknik", role: "Mekanik", name: "Hidrofor Odası", assetId: "PP-020", assetIds: ["PP-020", "PP-021-01", "PP-021-02"], floorLabel: "5", side: "Beşiktaş",
+    assetDesc: "5. Kat Beşiktaş Teknik Mahal içindeki hidrofor seti (3 pompa)", period: "Günlük",
     questions: [
       { text: "Hidrofor basıncı (bar)", type: "sayi", unit: "bar", min: 3, max: 6 },
       { text: "Pompa otomatik devreye giriyor mu?", failOn: "Hayır" },
@@ -1282,6 +1298,27 @@ export function migrateLegacyState(state) {
     const missingPanoPoints = [...TEKNIK_PANO_HAFTALIK, ...TEKNIK_PANO_AYLIK].filter((p) => !existingIds.has(p.id));
     if (missingPanoPoints.length > 0) {
       next = { ...next, mahalPoints: [...next.mahalPoints, ...missingPanoPoints] };
+    }
+  }
+  // Kullanıcı teyidiyle: "chillerlerde sürkülasyon pompalarıda var...
+  // hidraforlarda pano var genleşme tankları var — birbirine bağlı
+  // ekipmanları kontrolü atlamak için" — mtd4/mtd5'e eklenen `assetIds`
+  // (bkz. bu noktaların tanımı) canlı Firestore'daki ZATEN PERSİST edilmiş
+  // eski kayıtlara (assetIds hiç yok) otomatik yansımaz — seed sabiti
+  // değiştirmek tek başına hiçbir şey kazandırmaz (Pano kontrolleri'ndeki
+  // AYNI sorun/çözüm). Sadece bu iki noktanın `assetIds` alanı eksikse
+  // (idempotent — tekrar tekrar üzerine yazmaz) MAHAL_POINTS'teki güncel
+  // haliyle senkronlanır.
+  if (Array.isArray(next.mahalPoints)) {
+    const assetIdsById = new Map(MAHAL_POINTS.filter((p) => p.assetIds).map((p) => [p.id, p.assetIds]));
+    if (assetIdsById.size > 0) {
+      let changed = false;
+      const points = next.mahalPoints.map((p) => {
+        const wanted = assetIdsById.get(p.id);
+        if (wanted && !p.assetIds) { changed = true; return { ...p, assetIds: wanted }; }
+        return p;
+      });
+      if (changed) next = { ...next, mahalPoints: points };
     }
   }
   // Güvenlik ağı: newUnitId()'nin modül içi sayacı sayfa yenilendiğinde
