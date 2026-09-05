@@ -9,6 +9,7 @@ import { listVersionBackups } from "../lib/backup.js";
 import { showToast } from "../lib/toast.js";
 import { authErrorMessage } from "../lib/authErrors.js";
 import { APP_VERSION } from "../version.js";
+import { sendEmail } from "../lib/email.js";
 
 const TABS = [
   { key: "genel", label: "Genel" },
@@ -404,6 +405,49 @@ function BackupsPanel({ canWrite }) {
   );
 }
 
+// Kullanıcı teyidiyle: "ayarlara google mail smtp servisi kur" — daha önce
+// "başka bir servisim zaten var" denip adı belirtilmemişti (Talep/Şikayet
+// bilgilendirme maili ve tamamlanma anketi bu yüzden bekletiliyordu), şimdi
+// netleşti: Gmail SMTP. Gerçek gönderim SADECE netlify/functions/
+// send-email.js'te (GMAIL_USER/GMAIL_APP_PASSWORD ortam değişkenleri) —
+// burada sadece HANGİ adrese gönderileceği (sır değil, sıradan
+// yapılandırma) + bağlantıyı doğrulayan bir "Test Gönder" butonu var.
+function EmailNotificationsCard({ state, updateState, canWrite }) {
+  const T = useTheme();
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function sendTest() {
+    if (!state.notificationEmail) return;
+    setSending(true);
+    setResult(null);
+    try {
+      await sendEmail({ to: state.notificationEmail, subject: "Park Plaza — Test E-postası", text: `Bu bir test e-postasıdır. Gmail SMTP bağlantısı çalışıyor.\n\nGönderen: ${state.branding?.orgName || "Park Plaza"} Dijital Operasyon Merkezi` });
+      setResult({ ok: true, message: "Gönderildi — gelen kutusunu kontrol edin." });
+    } catch (err) {
+      setResult({ ok: false, message: err.message });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <CardTitle>E-posta Bildirimleri (Gmail SMTP)</CardTitle>
+      <p style={{ margin: "0 0 10px", fontSize: 11.5, color: T.dimmer }}>Talep/Şikayet süreç bilgilendirmesi ve tamamlanma anketi bu adrese/den gönderilir. Gmail hesabı ve uygulama şifresi Netlify ortam değişkenlerinde (GMAIL_USER/GMAIL_APP_PASSWORD) tutulur — burada sadece bildirimlerin gideceği adres var.</p>
+      <Field label="Bildirim E-postası">
+        <Input disabled={!canWrite} type="email" value={state.notificationEmail || ""} onChange={(e) => updateState({ notificationEmail: e.target.value })} placeholder="yonetim@parkplazamaslak.com" style={{ maxWidth: 320 }} />
+      </Field>
+      {canWrite && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+          <Button variant="ghost" onClick={sendTest} disabled={sending || !state.notificationEmail}>{sending ? "Gönderiliyor…" : "Test E-postası Gönder"}</Button>
+          {result && <span style={{ fontSize: 11.5, color: result.ok ? "#3FB37F" : "#DC5A34" }}>{result.message}</span>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Kat Planı / Firmalar (malik-kiracı) artık Operasyonlar > Kat Planı sekmesinde
 // yönetiliyor — binanın tüm departmanlarının (Teknik/Temizlik/Güvenlik/Talep-
 // Şikayet) referans aldığı ortak veri olduğu için buradan taşındı.
@@ -444,6 +488,7 @@ export function Ayarlar({ state, updateState, canWrite = true, currentUser }) {
               <option value="ai_first">Açık — önce AI dener</option>
             </Select>
           </Card>
+          <EmailNotificationsCard state={state} updateState={updateState} canWrite={canWrite} />
           <Card>
             <CardTitle>Marka / Bina Bilgisi</CardTitle>
             <Field label="Kurum adı"><Input disabled={!canWrite} value={state.branding.orgName} onChange={(e) => updateBranding({ orgName: e.target.value })} /></Field>
