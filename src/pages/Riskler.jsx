@@ -16,7 +16,7 @@ function empty() { return { id: null, title: "", location: "", probability: 3, i
 // tarayıp boşluk bulan denetim panelini burada, "Risk ve Rapor" grubunda
 // zaten olan bu ekranın ikinci sekmesi olarak sunuyoruz — yeni bir nav
 // öğesi/route eklemeden.
-export function Riskler({ state, updateState, canWrite = true }) {
+export function Riskler({ state, updateState, canWrite = true, currentUser }) {
   const [tab, setTab] = useState("kayitlar");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(empty());
@@ -58,7 +58,7 @@ export function Riskler({ state, updateState, canWrite = true }) {
           </button>
         ))}
       </div>
-      {tab === "uygunluk" && <ComplianceScanPanel state={state} updateState={updateState} canWrite={canWrite} />}
+      {tab === "uygunluk" && <ComplianceScanPanel state={state} updateState={updateState} canWrite={canWrite} currentUser={currentUser} />}
       {tab === "kayitlar" && (
       <div>
       <PageHeader title="Riskler" subtitle={`${sorted.length} / ${state.risks.length} kayıtlı risk`} right={canWrite && <Button onClick={() => setFormOpen((s) => !s)}>Yeni Risk</Button>} />

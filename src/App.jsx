@@ -399,7 +399,7 @@ export default function App() {
     guvenlik: <Guvenlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("guvenlik")} mobileMode={isMobile} />,
     temizlik: <Temizlik state={state} updateState={updateState} currentUser={currentUser.name} deepLink={mahalDeepLink} onConsumeDeepLink={() => setMahalDeepLink(null)} canWrite={canWrite("temizlik")} mobileMode={isMobile} />,
     enerji: <Enerji state={state} updateState={updateState} canWrite={canWrite("enerji")} />,
-    riskler: <Riskler state={state} updateState={updateState} canWrite={canWrite("riskler")} />,
+    riskler: <Riskler state={state} updateState={updateState} canWrite={canWrite("riskler")} currentUser={currentUser.name} />,
     dokumanlar: <Dokumanlar state={state} />,
     raporlar: <Raporlar state={state} />,
     kpi: <Kpi state={state} />,
