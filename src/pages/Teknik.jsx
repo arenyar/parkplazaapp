@@ -15,6 +15,7 @@ import { consumeStockPatch } from "../lib/stock.js";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
 import { AssetsFieldScreen } from "../mobile/assets/AssetsFieldScreen.jsx";
 import { AssetScanSheet } from "../mobile/create/AssetScanSheet.jsx";
+import { AiChecklistChat } from "../mobile/checklist/AiChecklistChat.jsx";
 import { floorPhrase } from "../piramitData.js";
 
 const TABS = [
@@ -58,6 +59,7 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
   // noktası açılır (focusPointId — hem MahalGridScreen hem MahalKontrol bunu
   // dinler) ya da mevcut QuickWorkFlow "Arıza Kaydı Aç" akışı tetiklenir.
   const [assetScan, setAssetScan] = useState(null);
+  const [aiChecklistTarget, setAiChecklistTarget] = useState(null);
   const [focusPointId, setFocusPointId] = useState(null);
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Teknik") return;
@@ -205,12 +207,26 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
       <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
       <AssetScanSheet assetScan={assetScan} asset={state.assets.find((a) => a.id === assetScan?.assetId)}
         onClose={() => setAssetScan(null)}
-        onStartCheck={() => { setFocusPointId(assetScan.matchedPointId); setAssetScan(null); }}
+        onStartCheck={() => {
+          const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
+          if (state.aiChecklistMode === "ai_first" && point && !point.perFloor) {
+            setAiChecklistTarget({ point, location: null });
+          } else {
+            setFocusPointId(assetScan.matchedPointId);
+          }
+          setAssetScan(null);
+        }}
         onStartFault={() => {
           const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
           quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
           setAssetScan(null);
         }} />
+      {aiChecklistTarget && (
+        <AiChecklistChat state={state} updateState={updateState} currentUser={currentUser} department="Teknik"
+          point={aiChecklistTarget.point} location={aiChecklistTarget.location}
+          asset={state.assets.find((a) => a.id === aiChecklistTarget.point.assetId)}
+          onClose={() => setAiChecklistTarget(null)} />
+      )}
     </div>
   );
 }

@@ -436,6 +436,14 @@ export function Ayarlar({ state, updateState, canWrite = true, currentUser }) {
             <p style={{ margin: 0, fontSize: 13, color: T.ink }}>Şu an yayında: <b>{APP_VERSION}</b></p>
             <p style={{ margin: "4px 0 0", fontSize: 11, color: T.dimmer }}>Eski bir sürüme dönmek gerekirse Yedekler sekmesinden yapılabilir.</p>
           </Card>
+          <Card style={{ marginBottom: 16 }}>
+            <CardTitle>AI Checklist (Beta)</CardTitle>
+            <p style={{ margin: "0 0 10px", fontSize: 11.5, color: T.dimmer }}>Varlık QR'ı okutulup "Bakım Kontrolü Yap" seçildiğinde önce yapay zekanın soru sorması mı, yoksa doğrudan klasik formun mu açılacağı. Herhangi bir hata/zaman aşımında AI oturumu otomatik klasik forma düşer — veri kaybı olmaz.</p>
+            <Select disabled={!canWrite} value={state.aiChecklistMode || "classic_only"} onChange={(e) => updateState({ aiChecklistMode: e.target.value })} style={{ maxWidth: 260 }}>
+              <option value="classic_only">Kapalı — sadece klasik form</option>
+              <option value="ai_first">Açık — önce AI dener</option>
+            </Select>
+          </Card>
           <Card>
             <CardTitle>Marka / Bina Bilgisi</CardTitle>
             <Field label="Kurum adı"><Input disabled={!canWrite} value={state.branding.orgName} onChange={(e) => updateBranding({ orgName: e.target.value })} /></Field>

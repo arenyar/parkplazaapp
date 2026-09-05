@@ -481,14 +481,19 @@ function powerFactor(activeKw, reactiveKvar) {
   return { apparentKva, cosPhi: apparentKva > 0 ? activeKw / apparentKva : 0 };
 }
 
-export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, department, inTour, onSubmit, onClose, onReportIncident }) {
+// `initialAnswers` — Faz 4 (AI checklist): AI sohbetinde zaten cevaplanmış
+// maddeler, klasik forma "önceden doldurulmuş" olarak taşınır (spesifikasyon
+// madde 2: "otomatik geri düşüş... yarıda kalan AI oturumundaki cevaplar
+// klasik forma taşınır"). Opsiyonel — verilmezse davranış AYNEN eskisi gibi
+// boş bir formla başlar.
+export function FillModal({ point, location, shift, meters, state, run, team, currentUser, assets, department, inTour, initialAnswers, onSubmit, onClose, onReportIncident }) {
   // Kullanıcı teyidiyle: "mahal kontrollerde de kontrole başladığı ve
   // bitirdiği anları mahal mahal takip edecek şekilde sistemi kurgula" —
   // bu form açıldığı an "kontrole başlangıç" kabul edilir (useState
   // initializer ile bir kez, her re-render'da değil).
   const [startedAt] = useState(() => new Date().toISOString());
   const [inspector, setInspector] = useState(currentUser || "");
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState(() => initialAnswers || {});
   const [note, setNote] = useState("");
   // Kullanıcı teyidiyle: "teknik mahal kontroller için tamamlandıktan sonra
   // personel imza ekranı olsun" — sadece Teknik'te zorunlu (Güvenlik'in
