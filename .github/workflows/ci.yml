@@ -1,0 +1,59 @@
+name: CI
+
+# Kullanıcı teyidiyle ("düzelt + commit et"): bu dosya bu repoya dışarıdan
+# (bir KURULUM.md paketiyle) geldi ve iki gerçek hata içeriyordu — ikisi de
+# düzeltildi:
+# 1. Repo'nun varsayılan dalı `master` (bkz. android-build.yml, tüm
+#    `git push origin master` komutları) — `main` DEĞİL. `branches: [main]`
+#    ile bu workflow hiçbir zaman tetiklenmezdi.
+# 2. Secret-scan adımı `src/firebase.js`'teki BİLEREK PUBLIC olan Firebase
+#    Web API key'ini (bkz. o dosyadaki not, ve netlify.toml'daki AYNI
+#    istisna) "sızıntı" sanıp her build'i kırıyordu — sadece bu BİLİNEN
+#    anahtar hariç tutuldu, taramanın kendisi kapatılmadı.
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Bagimliliklar
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Typecheck
+        run: npm run typecheck --if-present
+
+      # Faz 3 (AI checklist) ile eklendi (bkz. src/lib/*.test.js) — ağ
+      # gerektirmeyen, node:test ile yazılmış birim testleri.
+      - name: Birim testleri
+        run: npm run test --if-present
+
+      - name: Build
+        run: npm run build
+
+      - name: Firestore rules testi (emulator)
+        run: npm run test:rules --if-present
+
+      - name: Istemci paketinde secret sizintisi taramasi
+        run: |
+          KNOWN_PUBLIC_FIREBASE_KEY="AIzaSyBaG2wpFyFwri-q-LVjkdeYvvrSqJGYmis"
+          FOUND=$(grep -rIhoE 'AIza[0-9A-Za-z_-]{30,}' dist/ 2>/dev/null | sort -u | grep -v "^${KNOWN_PUBLIC_FIREBASE_KEY}$" || true)
+          if [ -n "$FOUND" ] || grep -rIl 'GEMINI_API_KEY' dist/ 2>/dev/null; then
+            echo "::error::Istemci paketinde BEKLENMEYEN bir API anahtari/secret bulundu. Deploy engellendi."
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "Temiz (bilinen public Firebase key haric)."
