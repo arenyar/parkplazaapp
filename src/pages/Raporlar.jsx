@@ -159,6 +159,10 @@ function buildGuvenlikRapor(state) {
   };
 }
 
+// Kullanıcı teyidiyle: "raporlarda enerji tüketim endeksi olacak" — tesis
+// yönetiminde standart bir gösterge (EnPI): bu ayki toplam tüketim ÷ bina
+// m². `buildingTotalM2` zaten state'te var (Ayarlar'daki bina bilgisinden,
+// bkz. mockData.js migrateLegacyState) — uydurma bir alan eklenmedi.
 function buildEnerjiRapor(state) {
   const daily = state.energyDaily || [];
   const total = daily.reduce((s, d) => s + d.kwh, 0);
@@ -166,11 +170,14 @@ function buildEnerjiRapor(state) {
   const peak = daily.reduce((max, d) => (d.kwh > (max?.kwh || 0) ? d : max), null);
   const summary = state.energySummary || {};
   const pct = summary.lastMonth ? Math.round(((summary.thisMonth - summary.lastMonth) / summary.lastMonth) * 100) : 0;
+  const m2 = state.buildingTotalM2 || 0;
+  const consumptionIndex = m2 > 0 ? (summary.thisMonth || 0) / m2 : null;
   return {
     title: "Enerji Raporu", subtitle: `Son ${daily.length} gün`,
     stats: [
       { label: "Bu Ay Toplam", value: `${money(summary.thisMonth)} ${summary.unit || "kWh"}` },
       { label: "Geçen Aya Göre", value: `${pct > 0 ? "+" : ""}${pct}%` },
+      { label: "Enerji Tüketim Endeksi", value: consumptionIndex != null ? `${consumptionIndex.toFixed(2)} kWh/m²` : "—" },
       { label: "Günlük Ortalama", value: `${money(avg)} kWh` },
       { label: "En Yüksek Gün", value: peak ? `${trDate(peak.date)} — ${money(peak.kwh)} kWh` : "—" },
     ],

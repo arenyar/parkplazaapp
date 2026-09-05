@@ -7,6 +7,7 @@ import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask, TASK_STATUSES, TASK_PRIORITIES } from "../components/TaskForm.jsx";
 import { TALEP_TYPES } from "../mockData.js";
 import { buildFirmalar } from "../piramitData.js";
+import { allUnits, unitDisplayName } from "../lib/billing.js";
 import { uploadPhoto } from "../lib/storage.js";
 import StoredImage from "../components/StoredImage.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
@@ -41,7 +42,7 @@ function todayISO() { return new Date().toISOString().slice(0, 10); }
 function emptyRequest(department, currentUser) {
   const dept = department || "Teknik";
   return {
-    id: null, company: "", location: "", type: "Talep", department: dept,
+    id: null, company: "", location: "", unitId: "", type: "Talep", department: dept,
     processType: PROCESS_TYPES_BY_DEPARTMENT[dept]?.[0] || "", priority: "Orta",
     requester: currentUser || "", assignee: "", startDate: todayISO(), dueDate: "",
     status: "Yapılacak", description: "", hasPhoto: false, photoUrl: null, photoFile: null,
@@ -80,11 +81,16 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   const companyOptions = [...new Set([...firmalar.map((f) => f.name), form.company].filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr"));
   const floorOptions = [...new Set([...state.piramitFloors.map((f) => f.label), form.location].filter(Boolean))];
   const processOptions = PROCESS_TYPES_BY_DEPARTMENT[form.department] || [];
+  // Kullanıcı teyidiyle: "talepte önce kat sonra o kattaki tanımlı alanlar
+  // gelsin" — kat seçilince o kattaki gerçek bağımsız bölümler (Kat
+  // Planı'ndaki, uydurma değil) listelenir; bir bölüm seçilince o bölümün
+  // kiracısı varsa Firma alanı otomatik doldurulur (elle değiştirilebilir).
+  const unitsOnFloor = form.location ? allUnits(state.piramitFloors).filter((u) => u.floorLabel === form.location) : [];
 
   function startNew() { setForm(emptyRequest(state.departments[0], currentUser)); setClosureOpen(false); setFormOpen(true); }
   function startEdit(t) {
     setForm({
-      id: t.id, company: t.company || "", location: t.location || "", type: t.issueType, department: t.department,
+      id: t.id, company: t.company || "", location: t.location || "", unitId: t.unitId || "", type: t.issueType, department: t.department,
       processType: t.processType || PROCESS_TYPES_BY_DEPARTMENT[t.department]?.[0] || "", priority: t.priority,
       requester: t.requester || "", assignee: t.assignee || "", startDate: t.startDate || todayISO(), dueDate: t.dueDate || "",
       status: t.status, description: t.description, hasPhoto: !!t.hasPhoto, photoUrl: t.photoUrl || null, photoFile: null,
@@ -93,11 +99,25 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
     setClosureOpen(!!(t.rootCause || t.resolution || t.closedDate));
     setFormOpen(true);
   }
+  // Kullanıcı teyidiyle: "web ekranında da mobilde olduğu gibi içine
+  // girmeden işi başlat işi bitir personel ata olsun" — TaskList.jsx'in
+  // satır-üstü hızlı aksiyonları bu fonksiyonu çağırır, formu hiç açmadan.
+  function quickUpdate(id, merged) {
+    updateState({ tasks: state.tasks.map((t) => (t.id === id ? merged : t)) });
+  }
 
   function onCompanyChange(name) {
     const rec = firmalar.find((f) => f.name === name);
     const autoFloor = rec && rec.locations.length > 0 ? rec.locations[0].floor : "";
     setForm((f) => ({ ...f, company: name, location: autoFloor || f.location }));
+  }
+  function onFloorChange(label) {
+    setForm((f) => ({ ...f, location: label, unitId: "" }));
+  }
+  function onUnitChange(unitId) {
+    const rec = allUnits(state.piramitFloors).find((u) => u.unit.id === unitId);
+    const tenantName = rec ? unitDisplayName(rec.unit, state.companies) : "";
+    setForm((f) => ({ ...f, unitId, company: tenantName && tenantName !== "—" ? tenantName : f.company }));
   }
   function onDepartmentChange(dept) {
     setForm((f) => ({ ...f, department: dept, processType: PROCESS_TYPES_BY_DEPARTMENT[dept]?.[0] || "" }));
@@ -131,7 +151,7 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
       }
     }
     const payload = {
-      company: form.company, location: form.location, issueType: form.type, department: form.department,
+      company: form.company, location: form.location, unitId: form.unitId || null, issueType: form.type, department: form.department,
       processType: form.processType, priority: form.priority, requester: form.requester, assignee: form.assignee,
       startDate: form.startDate, dueDate: form.dueDate, status: form.status, description: form.description,
       hasPhoto: form.hasPhoto || !!photoUrl, photoUrl, rootCause: form.rootCause, resolution: form.resolution, closedDate: form.closedDate,
@@ -159,20 +179,28 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
         right={canWrite && <Button icon={Plus} onClick={startNew}>Yeni Talep / Şikayet</Button>} />
 
       {formOpen && canWrite && (
-        <Card style={{ marginBottom: 16 }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={() => setFormOpen(false)}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 760, maxHeight: "90vh", overflowY: "auto" }}>
+        <Card>
           <div style={{ fontSize: 15, fontWeight: 700, color: T.ink, marginBottom: 2 }}>{form.id ? "Kaydı düzenle" : "Yeni kayıt oluştur"}</div>
           <div style={{ fontSize: 11.5, color: T.dim, marginBottom: 14 }}>Kaydeden: {currentUser}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
+            <Field label="1. Kat">
+              <Select value={form.location} onChange={(e) => onFloorChange(e.target.value)}>
+                <option value="">Kat seçin…</option>
+                {floorOptions.map((label) => <option key={label}>{label}</option>)}
+              </Select>
+            </Field>
+            <Field label="2. Alan / Bağımsız Bölüm">
+              <Select value={form.unitId} onChange={(e) => onUnitChange(e.target.value)} disabled={!form.location}>
+                <option value="">{form.location ? "Alan seçin (opsiyonel)…" : "Önce kat seçin"}</option>
+                {unitsOnFloor.map(({ unit, floorLabel }) => <option key={unit.id} value={unit.id}>{unitDisplayName(unit, state.companies)}{unit.no ? ` — No: ${unit.no}` : ""}{unit.side ? ` (${unit.side})` : ""}</option>)}
+              </Select>
+            </Field>
             <Field label="Firma Adı">
               <Select value={form.company} onChange={(e) => onCompanyChange(e.target.value)}>
                 <option value="">— Saha kaydı (firma yok) —</option>
                 {companyOptions.map((name) => <option key={name}>{name}</option>)}
-              </Select>
-            </Field>
-            <Field label="Kat / Lokasyon">
-              <Select value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}>
-                <option value="">Kat seçin…</option>
-                {floorOptions.map((label) => <option key={label}>{label}</option>)}
               </Select>
             </Field>
             <Field label="Kayıt Türü"><Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>{TALEP_TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
@@ -236,9 +264,12 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
             <Button variant="quiet" onClick={() => setFormOpen(false)}>Vazgeç</Button>
           </div>
         </Card>
+        </div>
+        </div>
       )}
 
-      <TaskList tasks={requests} onEdit={startEdit} onDelete={remove} showDept emptyText="Henüz firma talebi / şikayeti kaydedilmedi." canWrite={canWrite} />
+      <TaskList tasks={requests} onEdit={startEdit} onDelete={remove} showDept emptyText="Henüz firma talebi / şikayeti kaydedilmedi." canWrite={canWrite}
+        team={state.team} currentUser={currentUser} onQuickUpdate={quickUpdate} />
     </div>
   );
 }
