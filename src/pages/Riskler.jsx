@@ -5,12 +5,19 @@ import { PageHeader, Card, Button, Field, Input, Select, TextArea, Pagination, E
 import { riskScore, riskBand } from "../lib/sla.js";
 import { fmtDate } from "../lib/format.js";
 import { usePagination } from "../lib/usePagination.js";
+import { ComplianceScanPanel } from "../components/ComplianceScanPanel.jsx";
 
 const RISK_BANDS = ["Kritik", "Yüksek", "Orta", "Düşük"];
 
 function empty() { return { id: null, title: "", location: "", probability: 3, impact: 3, owner: "", dueDate: "", action: "", status: "Açık" }; }
 
+// Faz 7a — AI-DENETCI-MODULU.md (kullanıcı teyidiyle "Faz 7a'ya atla, AI
+// gerektirmiyor"): elle girilen risk kayıtlarından AYRI, envanteri otomatik
+// tarayıp boşluk bulan denetim panelini burada, "Risk ve Rapor" grubunda
+// zaten olan bu ekranın ikinci sekmesi olarak sunuyoruz — yeni bir nav
+// öğesi/route eklemeden.
 export function Riskler({ state, updateState, canWrite = true }) {
+  const [tab, setTab] = useState("kayitlar");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(empty());
   // Playbook talimatı (Faz 6): "Görev, varlık, risk, doküman ve kontrol
@@ -42,6 +49,18 @@ export function Riskler({ state, updateState, canWrite = true }) {
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        {[{ key: "kayitlar", label: "Risk Kayıtları" }, { key: "uygunluk", label: "Uygunluk Denetimi" }].map((tb) => (
+          <button key={tb.key} onClick={() => setTab(tb.key)}
+            style={{ border: "none", borderRadius: 999, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+              background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.ink }}>
+            {tb.label}
+          </button>
+        ))}
+      </div>
+      {tab === "uygunluk" && <ComplianceScanPanel state={state} updateState={updateState} canWrite={canWrite} />}
+      {tab === "kayitlar" && (
+      <div>
       <PageHeader title="Riskler" subtitle={`${sorted.length} / ${state.risks.length} kayıtlı risk`} right={canWrite && <Button onClick={() => setFormOpen((s) => !s)}>Yeni Risk</Button>} />
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -95,6 +114,8 @@ export function Riskler({ state, updateState, canWrite = true }) {
         })}
       </div>
       <Pagination page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} total={sorted.length} />
+      </div>
+      )}
     </div>
   );
 }
