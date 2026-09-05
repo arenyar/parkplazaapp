@@ -7,6 +7,7 @@ import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
 import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScreen.jsx";
 import { MahalKontrol } from "./MahalKontrol.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
+import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
 
 const TABS = [
   { key: "mahal", label: "Mahal Kontrol" },
@@ -22,10 +23,17 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
 
+  const quick = useQuickWorkFlow({ state, updateState, currentUser, department: "Temizlik" });
   // Ana Sayfa'daki departman kısayollarından (bkz. Dashboard.jsx) gelirse
-  // deepLink.tab hangi sekmeye gidileceğini belirtir.
+  // deepLink.tab hangi sekmeye gidileceğini belirtir. "quickRequest"/
+  // "startTask" — bkz. mobile/create/QuickWorkFlow.jsx'teki not — BURADA
+  // (departman sayfası) tetiklenir, MahalKontrol'ün kendi effect'inde değil.
   useEffect(() => {
-    if (deepLink && deepLink.department === "Temizlik") setTab(deepLink.tab || "mahal");
+    if (!deepLink || deepLink.department !== "Temizlik") return;
+    if (deepLink.action === "quickRequest") { quick.start({ mode: "ariza" }); onConsumeDeepLink(); return; }
+    if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
+    setTab(deepLink.tab || "mahal");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink]);
 
   const deptTasks = state.tasks.filter((t) => t.department === "Temizlik" && !t.archived);
@@ -61,7 +69,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />}
+      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
 
       {tab === "gorevler" && (
         mobileMode ? (
@@ -77,6 +85,8 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
           </div>
         )
       )}
+
+      <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
     </div>
   );
 }

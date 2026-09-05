@@ -12,7 +12,7 @@ import { AiEditButton } from "../components/AiEditButton.jsx";
 import StoredImage from "../components/StoredImage.jsx";
 import { periodKey } from "../lib/periods.js";
 import { validateReading, latestReading } from "../lib/meterValidation.js";
-import { MAHAL_PERIODS, TALEP_TYPES } from "../mockData.js";
+import { MAHAL_PERIODS } from "../mockData.js";
 import { locationLabel, collectFireEquipmentLocations, floorPhrase, firmsAtFloorSide } from "../piramitData.js";
 import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
 import { uploadPhoto, uploadDataUrl } from "../lib/storage.js";
@@ -21,6 +21,7 @@ import { turKey, buildTurPlan, buildTurPlanForPoint, findActiveTur, startTurPatc
 function emptyPoint(department) {
   return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }], active: true };
 }
+
 
 // Teknik departmanı Elektrik ve Mekanik personeli için ayrı checklist görür
 // (kullanıcı teyidiyle: "Elektrik Personeli için Ayrı Teknik Personel İçin
@@ -1251,7 +1252,7 @@ function SkipConfirm({ fromLabel, skipped, label, onConfirm, onCancel }) {
 // Yıllık) otomatik olarak "Bekliyor" durumunda bir kontrol kaydı üretir —
 // personelin ayrıca "yeni kontrol oluştur" demesine gerek yok, QR okutunca
 // veya buradan tıklayınca doldurulmayı bekleyen kayıt zaten hazır.
-export function MahalKontrol({ state, updateState, currentUser, department, title = "Mahal Kontrol", deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+export function MahalKontrol({ state, updateState, currentUser, department, title = "Mahal Kontrol", deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false, onQuickRequest }) {
   const T = useTheme();
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyPoint(department));
@@ -1279,9 +1280,6 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   // TalepSikayet "requests" filtresi) ve saha kaydı olduğu rozetle belli
   // olur. Departman, gören kişinin kendi departmanına sabit DEĞİL — "PH
   // katında çöp var" örneğinde Güvenlik personeli Temizlik'e atayabilmeli.
-  const [quickRequestOpen, setQuickRequestOpen] = useState(false);
-  const [quickRequestForm, setQuickRequestForm] = useState(null);
-
   // Kullanıcı teyidiyle: "mahal kontrol ve devriye görev kartlarına aktif
   // pasif koy pasif olanları mobilde gösterme" — pasif işaretlenen bir
   // mahal/devriye noktası masaüstünde (tanım/yönetim ekranı) hâlâ görünür
@@ -1296,14 +1294,13 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   // ve karta kaydırılır, tekil bir noktaysa doğrudan kontrol formu açılır.
   useEffect(() => {
     if (!deepLink) return;
-    // Ana Sayfa'daki "Arıza Kaydı Aç" departman kısayolu (bkz. Dashboard.jsx)
-    // — belirli bir noktaya değil, sayfa geneline ait hızlı talep formunu
-    // doğrudan açar (üstteki "+ Talep/Şikayet Aç" ile aynı akış).
-    if (deepLink.action === "quickRequest" && deepLink.department === department) {
-      startQuickRequest();
-      onConsumeDeepLink();
-      return;
-    }
+    // "quickRequest"/"startTask" (Ana Sayfa > İşlerim "Görev Başlat" ve
+    // "Arıza Kaydı Aç" departman kısayolu) artık BURADA değil, departman
+    // sayfasının kendisinde (Teknik.jsx/Guvenlik.jsx/Temizlik.jsx) ele
+    // alınıyor — bkz. mobile/create/QuickWorkFlow.jsx'teki not: mobilde
+    // Teknik/Güvenlik'in "Mahal" sekmesi bu bileşeni (MahalKontrol) DEĞİL
+    // MahalGridScreen'i kullandığı için buradaki bir tetikleyici Teknik/
+    // Güvenlik'te hiç çalışmazdı.
     const point = state.mahalPoints.find((p) => p.id === deepLink.pointId && p.department === department);
     if (point) {
       if (point.perFloor) setFloorFocus({ pointId: point.id, floorLabel: deepLink.floorLabel });
@@ -1457,96 +1454,22 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   }
   function removeTask(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
 
-  const [quickUploading, setQuickUploading] = useState(false);
-  function startQuickRequest(source) {
-    const sourceLabel = source ? `${source.point.name}${source.location ? ` — ${source.location.label}` : ""}` : "";
-    setQuickRequestForm({
-      department, issueType: "Şikayet", priority: "Orta", status: "Yapılacak", description: "",
-      requester: currentUser || "", assignee: "", dueDate: "", location: sourceLabel, hasPhoto: false, photoFile: null,
-    });
-    setFillPoint(null);
-    setQuickRequestOpen(true);
-  }
-  function handleQuickPhoto(e) {
-    const file = e.target.files?.[0];
-    if (file) setQuickRequestForm((f) => ({ ...f, photoFile: file, hasPhoto: true }));
-  }
-  // Kullanıcı teyidiyle bulunan hata: "çekilen fotoğraf hiç kaydedilmiyordu"
-  // — bkz. lib/storage.js uploadPhoto. `photoFile` (File nesnesi, Firestore'a
-  // yazılamaz) kayıttan önce URL'e çevrilip payload'dan çıkarılıyor.
-  async function saveQuickRequest() {
-    if (!quickRequestForm.description.trim()) return;
-    const { photoFile, ...rest } = quickRequestForm;
-    let photoUrl = null;
-    if (photoFile) {
-      setQuickUploading(true);
-      try {
-        photoUrl = await uploadPhoto(photoFile, "gorev-fotograflari");
-      } catch (err) {
-        console.error("Fotoğraf yüklenemedi:", err);
-        alert("Fotoğraf yüklenemedi (kayıt yine de fotoğrafsız oluşturulacak): " + err.message);
-      } finally {
-        setQuickUploading(false);
-      }
-    }
-    const nextNo = Math.max(3100, ...state.tasks.map((t) => t.ticketNo || 0)) + 1;
-    const task = { id: `t_${Date.now()}`, ticketNo: nextNo, createdAt: new Date().toISOString(), company: "", viaMahal: true, ...rest, photoUrl };
-    updateState({ tasks: [...state.tasks, task] });
-    setQuickRequestOpen(false);
-  }
+  // "+ Talep/Şikayet Aç" ve NonConformityPanel'in "⚠ Olay Bildir"i artık bu
+  // ekranın kendi state'ini yönetmiyor — bkz. mobile/create/QuickWorkFlow.jsx
+  // (kat→departman→[mod]→form popup zinciri, `onQuickRequest` prop'u
+  // üzerinden departman SAYFASINA (Teknik.jsx/Guvenlik.jsx/Temizlik.jsx)
+  // devrediliyor; sebep yukarıdaki deepLink effect notunda).
 
   return (
     <div>
       <PageHeader title={title} subtitle={`${points.length} tanımlı mahal — periyoduna göre otomatik kontrol kaydı oluşur`}
         right={<>
-          <Button variant="quiet" onClick={() => startQuickRequest()}>+ Talep/Şikayet Aç</Button>
+          <Button variant="quiet" onClick={() => onQuickRequest?.({ mode: "ariza" })}>+ Talep/Şikayet Aç</Button>
           {!mobileMode && points.length > 0 && <Button variant="quiet" icon={QrCode} onClick={() => setBulkQrOpen(true)}>Toplu QR Bas</Button>}
           {canWrite && !mobileMode && <Button icon={Plus} onClick={startNew}>Yeni Mahal</Button>}
         </>} />
 
       {bulkQrOpen && <BulkQrModal points={points} state={state} onClose={() => setBulkQrOpen(false)} />}
-
-      {quickRequestOpen && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: T.ink, marginBottom: 2 }}>Talep / Şikayet Aç</div>
-          <div style={{ fontSize: 11, color: T.dim, marginBottom: 12 }}>📱 Saha kaydı — kaydeden: {currentUser}{quickRequestForm.location ? ` · ${quickRequestForm.location}` : ""}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10 }}>
-            <Field label="Departman" required>
-              <Select value={quickRequestForm.department} onChange={(e) => setQuickRequestForm((f) => ({ ...f, department: e.target.value }))}>
-                {state.departments.map((d) => <option key={d}>{d}</option>)}
-              </Select>
-            </Field>
-            <Field label="Kayıt Türü"><Select value={quickRequestForm.issueType} onChange={(e) => setQuickRequestForm((f) => ({ ...f, issueType: e.target.value }))}>
-              {TALEP_TYPES.map((t) => <option key={t}>{t}</option>)}
-            </Select></Field>
-            <Field label="Öncelik"><Select value={quickRequestForm.priority} onChange={(e) => setQuickRequestForm((f) => ({ ...f, priority: e.target.value }))}>
-              {["Düşük", "Orta", "Yüksek", "Kritik"].map((p) => <option key={p}>{p}</option>)}
-            </Select></Field>
-            <Field label="Termin"><Input type="date" value={quickRequestForm.dueDate} onChange={(e) => setQuickRequestForm((f) => ({ ...f, dueDate: e.target.value }))} /></Field>
-          </div>
-          {!quickRequestForm.location && (
-            <Field label="Kat / Lokasyon">
-              <Select value={quickRequestForm.location} onChange={(e) => setQuickRequestForm((f) => ({ ...f, location: e.target.value }))}>
-                <option value="">Kat seçin…</option>
-                {state.piramitFloors.map((f) => <option key={f.label} value={f.label}>{f.label}</option>)}
-              </Select>
-            </Field>
-          )}
-          <Field label="Açıklama" required><TextArea style={{ width: "100%", minHeight: 60 }} placeholder="Gördüğünüz uygunsuzluğu kısaca açıklayın." value={quickRequestForm.description} onChange={(e) => setQuickRequestForm((f) => ({ ...f, description: e.target.value }))} /></Field>
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 5 }}>Fotoğraf (opsiyonel)</label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, border: `1px dashed ${T.line}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer", color: T.dim, fontSize: 12.5 }}>
-              <Camera size={15} />
-              {quickRequestForm.hasPhoto ? "Fotoğraf seçildi ✓" : "Fotoğraf çek / seç"}
-              <input type="file" accept="image/*" capture="environment" onChange={handleQuickPhoto} style={{ display: "none" }} />
-            </label>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button onClick={saveQuickRequest} disabled={quickUploading}>{quickUploading ? "Fotoğraf yükleniyor…" : "Kaydı Oluştur"}</Button>
-            <Button variant="quiet" onClick={() => setQuickRequestOpen(false)}>Vazgeç</Button>
-          </div>
-        </Card>
-      )}
 
       {department === "Teknik" && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -1727,7 +1650,7 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
           run={runFor(fillPoint.point, state.mahalRuns, fillPoint.location?.key, fillPoint.shift?.id)} team={state.team.filter((t) => t.department === fillPoint.point.department)} currentUser={currentUser} assets={state.assets}
           department={fillPoint.point.department} inTour={!!activeTur}
           onSubmit={submitFill} onClose={() => setFillPoint(null)}
-          onReportIncident={() => startQuickRequest({ point: fillPoint.point, location: fillPoint.location })} />
+          onReportIncident={() => onQuickRequest?.({ source: { point: fillPoint.point, location: fillPoint.location }, mode: "ariza" })} />
       )}
       {qrPoint && <QrModal point={qrPoint.point} location={qrPoint.location} floorGroup={qrPoint.floorGroup} onClose={() => setQrPoint(null)} />}
       {ncTarget && <NonConformityPanel point={ncTarget.point} location={ncTarget.location} state={state} onClose={() => setNcTarget(null)} />}

@@ -1,4 +1,5 @@
 import { AlertTriangle, Plus, QrCode, Wrench, ClipboardList, ClipboardCheck, FileWarning, Gauge, FileText, Building2, ChevronRight } from "lucide-react";
+import { DEPARTMENT_VIEW } from "../lib/departmentView.js";
 import { STATUS, PRIORITY_STYLES, deptColor } from "../theme.js";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { Card, CardTitle, Button } from "../components/ui.jsx";
@@ -311,9 +312,15 @@ export function Dashboard({ state, role, currentUser, onGoTo, onNewTask, onScan,
     // Kullanıcı teyidiyle: "Durum Ekranında bölümler olsun: 1 İşlerim 2
     // Havuzda Bekleyen işler" — PersonCard.jsx "Açık işler" sekmesindeki AYNI
     // iki kategori (assigned/pool), burada Ana Sayfa'nın kendi bölümü olarak.
+    // "Görev Başlat" yeni kat→departman popup akışını (bkz.
+    // mobile/create/QuickWorkFlow.jsx) kullanır — ama bu akış Teknik/
+    // Güvenlik/Temizlik'in KENDİ departman sayfasında (DEPARTMENT_VIEW
+    // eşlemesi olan) barındırılıyor. Yönetim'in böyle bir sayfası yok
+    // (DEPARTMENT_VIEW["Yönetim"] tanımsız) — eski `onNewTask` yoluna
+    // (düz görev formu) düşülmezse buton sessizce hiçbir şey yapmazdı.
     islerim: DEPT_SHORTCUTS[role] ? (
       <Card key="islerim">
-        <CardTitle right={<Button variant="ghost" icon={Plus} onClick={() => onNewTask({ department: role })}>Görev Başlat</Button>}>İşlerim</CardTitle>
+        <CardTitle right={<Button variant="ghost" icon={Plus} onClick={() => (DEPARTMENT_VIEW[role] ? onShortcut(role, "mahal", "startTask") : onNewTask({ department: role }))}>Görev Başlat</Button>}>İşlerim</CardTitle>
         {taskCategories.assigned.length === 0 && <p style={{ color: T.dim, fontSize: 13 }}>Size atanmış açık iş yok.</p>}
         {taskCategories.assigned.slice(0, 8).map((t) => {
           const ps = PRIORITY_STYLES[t.priority] || {};

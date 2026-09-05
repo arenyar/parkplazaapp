@@ -55,7 +55,16 @@ function PlaceholderScreen({ baslik }) {
 // eylemleri verme"). Masaüstüne "Masaüstü sürümüne geç" ile erişilebilirler.
 function renderScreen(screenKey, p) {
   switch (screenKey) {
-    case "dashboard": return <Dashboard state={p.state} role={p.role} currentUser={p.currentUser} onGoTo={p.goToScreen} onNewTask={() => p.newTask()} onScan={p.onScan} onOpenAlert={() => p.goToOperasyonlar()} onShortcut={p.goToDeptShortcut} onOpenPerson={p.goToPerson} onOpenTicket={p.openTicket} />;
+    // DÜZELTME (kullanıcı teyidiyle bulunan hata): "havuzdaki işleri net
+    // göremiyorsun" — onOpenAlert argümanını (goTo/ref) yok sayıp HER ZAMAN
+    // genel "operasyonlar" listesine gidiyordu; İşlerim/Havuzda Bekleyen
+    // İşler'de bir karta dokunmak o kaydın DETAYINI açmıyordu. Artık
+    // goTo==="operasyonlar" + gerçek bir görev ref'i varsa doğrudan o
+    // kaydın detayı açılır (openTicket ile AYNI, Personel bölümündeki
+    // mekanizma); değilse alert'in kendi hedef ekranına gidilir.
+    case "dashboard": return <Dashboard state={p.state} role={p.role} currentUser={p.currentUser} onGoTo={p.goToScreen} onNewTask={() => p.newTask()} onScan={p.onScan}
+      onOpenAlert={(a) => (a?.goTo === "operasyonlar" && a?.ref ? p.openTicket(a.ref) : p.goToScreen(a?.goTo || "operasyonlar"))}
+      onShortcut={p.goToDeptShortcut} onOpenPerson={p.goToPerson} onOpenTicket={p.openTicket} />;
     case "operasyonlar": return (
       <TaskListScreen
         state={p.state} updateState={p.updateState} currentUserName={p.currentUserName}

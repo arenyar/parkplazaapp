@@ -10,6 +10,7 @@ import { SignaturePad } from "../components/SignaturePad.jsx";
 import { fmtDateTime } from "../lib/format.js";
 import { MahalKontrol } from "./MahalKontrol.jsx";
 import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
+import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
 import { uploadDataUrl, uploadPhoto } from "../lib/storage.js";
 import { findDeptManager } from "../mockData.js";
 import { openMailto } from "../lib/mailto.js";
@@ -148,15 +149,24 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
   // deepLink.tab hangi sekmeye gidileceğini belirtir; "Olay Tutanağı"
   // kısayolu ayrıca deepLink.action === "newIncident" ile formu da otomatik
   // açar (kullanıcı teyidiyle: "güvenlik olay tutanağı ve devriye tur olacak").
+  const quick = useQuickWorkFlow({ state, updateState, currentUser, department: "Güvenlik" });
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Güvenlik") return;
+    // Kullanıcı teyidiyle: "önce kat seçsin sonra departman seçsin..." — bkz.
+    // mobile/create/QuickWorkFlow.jsx'teki not: bu akış BURADA (departman
+    // sayfası) tetiklenir, mobilde "mahal" sekmesi MahalKontrol'ü DEĞİL
+    // MahalGridScreen'i kullandığı için MahalKontrol'ün kendi effect'i
+    // artık bu iki action'ı hiç dinlemiyor.
+    if (deepLink.action === "quickRequest") { quick.start({ mode: "ariza" }); onConsumeDeepLink(); return; }
+    if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
     const targetTab = deepLink.tab || "mahal";
     setTab(targetTab);
     if (deepLink.action === "newIncident") { setForm(emptyIncidentForm()); setFormOpen(true); }
     // "mahal" sekmesine gidiyorsa deepLink'i aşağıdaki MahalKontrol kendi
-    // effect'inde tüketir (nokta odaklama/hızlı talep için); başka bir
-    // sekmeye gidiyorsa MahalKontrol hiç mount olmaz, burada tüketilmeli.
+    // effect'inde tüketir (nokta odaklama için, sadece masaüstünde mount
+    // olur); başka bir sekmeye gidiyorsa burada tüketilmeli.
     if (targetTab !== "mahal") onConsumeDeepLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink]);
 
   const dictation = useSpeechDictation((text) => {
@@ -427,7 +437,7 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
       {tab === "mahal" && (
         mobileMode
           ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} />
-          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={deepLink} onConsumeDeepLink={onConsumeDeepLink} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
       )}
 
       {tab === "gorevler" && (
@@ -449,6 +459,8 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
         <IncidentReportView incident={viewIncident} team={state.team} branding={state.branding} logoUrl={state.invoiceSettings?.logoUrl}
           canWrite={canWrite} onSignatureSaved={saveIncidentSignature} onClose={() => setViewIncident(null)} />
       )}
+
+      <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
     </div>
   );
 }
