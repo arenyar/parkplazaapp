@@ -567,6 +567,31 @@ function findInTeknikMahaller(mahaller, assetId, floorLabel, parentSide, parentR
     if (m.rooms) findInTeknikMahaller(m.rooms, assetId, floorLabel, side, roomLabel, locs);
   });
 }
+// Kullanıcı teyidiyle: "teknikde varlıkları güncelleyebileceğimiz bir alan
+// olsun... sahada personel gezerken ilgili kattaki ekipmanı güncellesin" —
+// findAssetLocations'ın (asset→konumlar) TERSİ: bir kata bağlı TÜM
+// ekipman kimliklerini döner. Aynı gezinme (units/teknikMahaller/rooms),
+// tek fark: tek bir assetId'yi aramak yerine hepsini topluyor.
+function collectMahalEquipment(mahaller, ids) {
+  (mahaller || []).forEach((m) => {
+    (m.equipmentIds || []).forEach((id) => ids.add(id));
+    if (m.rooms) collectMahalEquipment(m.rooms, ids);
+  });
+}
+export function assetIdsForFloor(floors, floorLabel) {
+  const floor = (floors || []).find((f) => f.label === floorLabel);
+  if (!floor) return [];
+  const ids = new Set();
+  if (floor.type === "kat") {
+    (floor.units || []).forEach((u) => (u.equipmentIds || []).forEach((id) => ids.add(id)));
+  }
+  (floor.equipmentIds || []).forEach((id) => ids.add(id));
+  (floor.equipmentBesiktasIds || []).forEach((id) => ids.add(id));
+  (floor.equipmentSariyerIds || []).forEach((id) => ids.add(id));
+  if (floor.teknikMahaller) collectMahalEquipment(floor.teknikMahaller, ids);
+  return [...ids];
+}
+
 export function findAssetLocations(floors, assetId) {
   const locs = [];
   floors.forEach((f) => {

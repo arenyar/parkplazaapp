@@ -13,6 +13,7 @@ import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
 import { consumeStockPatch } from "../lib/stock.js";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
+import { AssetsFieldScreen } from "../mobile/assets/AssetsFieldScreen.jsx";
 
 const TABS = [
   { key: "takvim", label: "Bakım Takvimi" },
@@ -21,6 +22,7 @@ const TABS = [
   { key: "ariza", label: "Arıza Kayıtları" },
   { key: "gorevler", label: "Görevler" },
   { key: "sayacokuma", label: "Sayaç Okuma" },
+  { key: "varliklar", label: "Varlıklar" },
 ];
 
 // Teknik modülü — görseldeki sekmeli üst bar deseni. Bakım Takvimi'nde
@@ -126,7 +128,7 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
           Başlat" akışı artık aynı işi görüyor, ayrı bir sekmeye gerek yok. */}
       {mobileMode && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "takvim", label: "Bakım Takvimi" }].map((tb) => (
+          {[{ key: "mahal", label: "Mahal Kontrol" }, { key: "takvim", label: "Bakım Takvimi" }, { key: "varliklar", label: "Varlıklar" }].map((tb) => (
             <button key={tb.key} onClick={() => setTab(tb.key)}
               style={{ flex: 1, border: "none", borderRadius: 10, padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", minHeight: 44,
                 background: tab === tb.key ? T.accent : T.surface2, color: tab === tb.key ? (T.onAccent ?? "#fff") : T.dim }}>
@@ -181,6 +183,8 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
       )}
 
       {tab === "sayacokuma" && <SayacOkuma state={state} updateState={updateState} canWrite={canWrite} mobileMode={mobileMode} />}
+
+      {tab === "varliklar" && <AssetsFieldScreen state={state} updateState={updateState} canWrite={canWrite} />}
 
       <QuickWorkFlowModals quick={quick} state={state} currentUser={currentUser} />
     </div>
