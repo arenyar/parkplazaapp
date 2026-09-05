@@ -25,6 +25,16 @@ export function metersForUnit(waterMeters, floorId, unitId) {
   return (waterMeters || []).filter((m) => !m.archived && m.unitRef && m.unitRef.floorId === floorId && m.unitRef.unitId === unitId);
 }
 
+// Kullanıcı teyidiyle: "Sayaç okumada ortak alan sayacı olan katlar
+// gözüksün" — Enerji > Su Okuma'dan eklenen sayaçların hepsi bir bağımsız
+// bölüme (unitRef) bağlı değil; kat geneli/ortak alan sayaçları sadece
+// floorLabel taşır (bkz. Enerji.jsx onAddMeter). SayacOkuma.jsx'in mobil
+// kat→bölüm akışı eskiden SADECE metersForUnit'e (unitRef zorunlu)
+// bakıyordu, bu yüzden ortak alan sayaçlarına hiç ulaşılamıyordu.
+export function commonMetersForFloor(waterMeters, floorLabel) {
+  return (waterMeters || []).filter((m) => !m.archived && !m.unitRef && m.floorLabel === floorLabel);
+}
+
 // Algoritmik sayaç no'su — kullanıcı teyidiyle: "sayaç noda algoritmik
 // blokblöm mantığında ilerlesin". SU_<kat>_<BlokHarfi><bölümNo>, ör. "SU_7_B19".
 // Aynı bölüme ikinci sayaç eklenirse "_02" soneki eklenir.

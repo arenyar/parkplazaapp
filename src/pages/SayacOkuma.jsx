@@ -4,7 +4,7 @@ import { T } from "../theme.js";
 import { PageHeader, Card, Button, Field, Input, TextArea } from "../components/ui.jsx";
 import { floorPhrase } from "../piramitData.js";
 import { validateReading, latestReading } from "../lib/meterValidation.js";
-import { allUnits, metersForUnit, generateMeterId, unitDisplayName } from "../lib/billing.js";
+import { allUnits, metersForUnit, commonMetersForFloor, generateMeterId, unitDisplayName } from "../lib/billing.js";
 
 function unitSubLabel(unit, floorLabel) {
   return `${floorPhrase(floorLabel)}${unit.side ? ` — ${unit.side}` : ""}${unit.no ? ` — No: ${unit.no}` : ""}`;
@@ -36,8 +36,14 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
   // görünmeye devam eder.
   const allUnitsList = allUnits(state.piramitFloors);
   const units = mobileMode ? allUnitsList.filter(({ unit, floorId }) => metersForUnit(state.waterMeters, floorId, unit.id).length > 0) : allUnitsList;
+  // Kullanıcı teyidiyle: "Sayaç okumada ortak alan sayacı olan katlar
+  // gözüksün" — bir bağımsız bölüme değil doğrudan kata bağlı (ortak alan)
+  // sayacı olan katlar da listeye girer, sadece bölüm sayaçlı katlar değil.
+  const commonFloorLabels = [...new Set((state.waterMeters || []).filter((m) => !m.archived && !m.unitRef && m.floorLabel).map((m) => m.floorLabel))];
   const floorLabels = [];
   units.forEach(({ floorLabel }) => { if (!floorLabels.includes(floorLabel)) floorLabels.push(floorLabel); });
+  commonFloorLabels.forEach((f) => { if (!floorLabels.includes(f)) floorLabels.push(f); });
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   // Adım 1 — Kat seç
   if (!selectedFloor) {
@@ -67,9 +73,10 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
     );
   }
 
-  // Adım 2 — Katın bağımsız bölümlerinden birini seç
+  // Adım 2 — Katın bağımsız bölümlerinden birini (veya ortak alanı) seç
   if (!selected) {
     const floorUnits = units.filter((u) => u.floorLabel === selectedFloor);
+    const commonMeters = commonMetersForFloor(state.waterMeters, selectedFloor);
     const q = query.trim().toLowerCase();
     const filtered = q
       ? floorUnits.filter(({ unit }) => `${unitDisplayName(unit, state.companies)} ${unit.no ?? ""}`.toLowerCase().includes(q))
@@ -80,6 +87,16 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
           <ChevronLeft size={16} /> Kat Listesine Dön
         </button>
         <PageHeader title={floorPhrase(selectedFloor)} subtitle="Bağımsız bölüm seçin" />
+        {commonMeters.length > 0 && (
+          <div onClick={() => { setSelected({ unit: null, floorId: null, floorLabel: selectedFloor, common: true }); setQuery(""); setActiveMeterId(null); setReadingValue(""); setReadingNote(""); }}
+            style={{ background: `${T.accent}14`, border: `1px solid ${T.accent}`, borderRadius: 14, padding: "14px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>Ortak Alan (Kat Geneli)</div>
+              <div style={{ fontSize: 11.5, color: T.dim }}>Belirli bir bağımsız bölüme değil, katın ortak alanına ait sayaçlar</div>
+            </div>
+            <div style={{ fontSize: 11, color: T.accent, fontWeight: 700, whiteSpace: "nowrap" }}>{commonMeters.length} sayaç</div>
+          </div>
+        )}
         <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Kiracı adına göre ara..." style={{ width: "100%", marginBottom: 12 }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {filtered.map(({ unit, floorId, floorLabel }) => {
@@ -95,21 +112,25 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
               </div>
             );
           })}
-          {filtered.length === 0 && <p style={{ fontSize: 12.5, color: T.dim }}>Eşleşen bağımsız bölüm yok.</p>}
+          {filtered.length === 0 && commonMeters.length === 0 && <p style={{ fontSize: 12.5, color: T.dim }}>Eşleşen bağımsız bölüm yok.</p>}
         </div>
       </div>
     );
   }
 
   // Adım 3 — Sayaç seç, okuma gir
-  const { unit, floorId, floorLabel } = selected;
-  const meters = metersForUnit(state.waterMeters, floorId, unit.id);
+  const { unit, floorId, floorLabel, common } = selected;
+  const meters = common ? commonMetersForFloor(state.waterMeters, floorLabel) : metersForUnit(state.waterMeters, floorId, unit.id);
   const currentMeter = meters.find((m) => m.id === activeMeterId) || null;
   const previous = currentMeter ? latestReading(state.waterReadings, currentMeter.id, "meterM3") : null;
   const check = currentMeter && readingValue !== "" ? validateReading(Number(readingValue), previous, state.meterWarningThresholdPct) : null;
-  const nextGeneratedId = generateMeterId(state.waterMeters, floorLabel, unit.side, unit.no);
+  const nextGeneratedId = common ? `SU_${floorLabel}_ORTAK` : generateMeterId(state.waterMeters, floorLabel, unit.side, unit.no);
 
+  // Ortak alan seçiliyken (unit yok) buradan yeni sayaç eklenmez — ortak
+  // alan sayaçları zaten Enerji > Su Okuma'dan (unitRef'siz, bkz. Enerji.jsx
+  // onAddMeter) tanımlanıyor; bu form sadece BAĞIMSIZ BÖLÜM sayacı ekler.
   function addMeter() {
+    if (common) return;
     const meter = { id: nextGeneratedId, name: newMeterName.trim() || `Su Sayacı${meters.length > 0 ? ` ${meters.length + 1}` : ""}`, floorLabel, side: unit.side, room: null, mahalKey: null, unitRef: { floorId, unitId: unit.id } };
     updateState({ waterMeters: [...state.waterMeters, meter] });
     setNewMeterName("");
@@ -129,12 +150,16 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
       <button onClick={() => setSelected(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: T.accent, fontSize: 12.5, fontWeight: 700, padding: 0, marginBottom: 10 }}>
         <ChevronLeft size={16} /> {floorPhrase(selectedFloor)} Bölümlerine Dön
       </button>
-      <PageHeader title={unitDisplayName(unit, state.companies)} subtitle={unitSubLabel(unit, floorLabel)} />
+      <PageHeader title={common ? "Ortak Alan (Kat Geneli)" : unitDisplayName(unit, state.companies)} subtitle={common ? floorPhrase(floorLabel) : unitSubLabel(unit, floorLabel)} />
 
       <div style={{ fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 8 }}>Sayaçlar</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
         {meters.map((m) => {
           const last = latestReading(state.waterReadings, m.id, "meterM3");
+          // Kullanıcı teyidiyle: "onlar hergün okunacak şekilde görev olsun"
+          // — tam bir Mahal Kontrol tipi periyodik görev altyapısı kurmadan,
+          // en somut karşılığı: bugün henüz okunmamışsa açıkça uyarı rozeti.
+          const readToday = state.waterReadings.some((r) => r.meterId === m.id && !r.archived && r.date === todayStr);
           return (
             <button key={m.id} onClick={() => { setActiveMeterId(m.id); setReadingValue(""); setReadingNote(""); }}
               style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${activeMeterId === m.id ? T.accent : T.line}`, background: activeMeterId === m.id ? `${T.accent}22` : T.surface2, color: activeMeterId === m.id ? T.accent : T.ink, borderRadius: 999, padding: "8px 14px", cursor: "pointer", textAlign: "left" }}>
@@ -144,6 +169,9 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
                 <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, display: "block" }}>
                   {last != null ? `Son okuma: ${last.toLocaleString("tr-TR")} m³` : "Henüz okuma yok"}
                 </span>
+                <span style={{ fontSize: 10.5, fontWeight: 800, display: "block", color: readToday ? "#4E8A46" : "#DC5A34" }}>
+                  {readToday ? "✓ Bugün okundu" : "⚠ Bugün henüz okunmadı"}
+                </span>
               </span>
             </button>
           );
@@ -151,7 +179,7 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
         {meters.length === 0 && <span style={{ fontSize: 12.5, color: T.dim }}>Bu bölüm için henüz sayaç tanımlanmadı.</span>}
       </div>
 
-      {canWrite && !mobileMode && (
+      {canWrite && !mobileMode && !common && (
         <Card style={{ marginBottom: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
             <Input value={newMeterName} onChange={(e) => setNewMeterName(e.target.value)} placeholder="Yeni sayaç adı (ops., ör. Su Sayacı 2)" />
@@ -159,6 +187,9 @@ export function SayacOkuma({ state, updateState, canWrite = true, mobileMode = f
           </div>
           <div style={{ fontSize: 11, color: T.dimmer, marginTop: 6 }}>Sayaç no otomatik oluşturulur: <b>{nextGeneratedId}</b></div>
         </Card>
+      )}
+      {canWrite && !mobileMode && common && (
+        <p style={{ fontSize: 11.5, color: T.dimmer, margin: "0 0 14px" }}>Ortak alan sayaçları buradan eklenmez — Enerji &gt; Su Okuma sekmesinden tanımlayın.</p>
       )}
 
       {currentMeter && (
