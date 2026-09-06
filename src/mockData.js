@@ -818,6 +818,170 @@ const TEKNIK_AYLIK_PERFLOOR = [
   },
 ];
 
+// Kullanıcı teyidiyle: kullanıcının kendi hazırladığı "temizlik-kontrol-
+// listesi.html" referans dosyasından ("ekteki soruları katlara göre
+// yerleştir... olumsuz cevaplara karşı sorularıda oluştur ve arka planda
+// sakla") uçtan uca aktarıldı. Her sorunun KENDİ, bu maddeye özgü bir
+// `action` (düzeltici aksiyon) metni var — bu, offlineGuidance.js'teki
+// GENEL desen kütüphanesinden daha spesifik olduğu için (bkz.
+// lib/offlineGuidance.js resolveGuidance) varsa ona öncelik verilir; UI'da
+// ayrı bir soru olarak GÖRÜNMEZ, sadece o madde olumsuz (failOn) işaretlenince
+// otomatik açılan bir yönlendirme kartında görünür ("arka planda sakla").
+// `severity` mevcut acil/takip/bilgi sözlüğüyle AYNI (bkz. AiChecklistChat.jsx
+// SEVERITY_LABEL) — kritik→acil, orta→takip, planlı→bilgi. `photoRequired`
+// sadece görsel bir vurgu/uyarı olarak kullanılır (kaydı engellemez — mevcut
+// "mümkünse fotoğraf ekleyin" nazik uyarısıyla aynı prensip).
+const TEMIZLIK_LOBI_SORULARI = [
+  { text: "Giriş cephe camları ve döner kapı camları parmak izi, leke ve sprey izi olmadan temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Kirli bölgeyi mikrofiber + cam suyu ile hemen sildir. El yüksekliğinin üstündeki lekeler için cephe temizlik ekibine iş emri aç ve tarih ver." },
+  { text: "Lobi zemini parlak, su izi, ayak izi ve leke yok mu?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Islak alanı derhal kurulat, gerekiyorsa nokta cila/pad uygulaması planla. Yoğun saatlerde tam yıkama yapma; 18:00 sonrası programa al." },
+  { text: "Islak zemin uyarı levhaları paspaslama yapılan alanlarda duruyor mu?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Levhayı anında yerleştir. Levhasız paspaslama iş güvenliği ihlalidir; personele sözlü uyarı yap ve tutanak defterine işle." },
+  { text: "Asansör kapıları ve paslanmaz yüzeyler parmak izsiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Paslanmaz bakım spreyi ile lif yönünde sildir. Kapı eşiği kanalındaki toz/taş için fırça + süpürge uygulat." },
+  { text: "Asansör çağrı butonları ve panelleri dezenfekte edildi mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Dezenfektanlı mendille hemen sildir, dezenfeksiyon takip kartına saat yazdır." },
+  { text: "Resepsiyon / danışma masası ve arkası tozsuz ve düzenli mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Masa üstünü ve monitör arkasını sildir. Masa üstü dağınıklığı personele aitse resepsiyon sorumlusuna bildir, temizlik kapsamı dışında not düş." },
+  { text: "Bekleme grubu koltuk, sehpa ve dekoratif yüzeyler temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Kumaş lekesi varsa nokta leke çıkarıcı uygula; çıkmıyorsa haftalık makineli koltuk yıkama listesine ekle." },
+  { text: "Turnike, bariyer ve kart okuyucu yüzeyleri silinmiş mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Elektronik yüzeylere doğrudan sprey sıkılmadan nemli bezle sildir." },
+  { text: "Lobi çöp kutuları boşaltıldı, poşet değiştirildi mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kutuyu hemen boşalt, iç haznesini sil, yeni poşet tak. Kutu %70 dolduysa boşaltma frekansını artır." },
+  { text: "Plaza girişi dış mıntıka (yürüyüş yolu, basamaklar, paspaslar) çöp ve izmaritten arınmış mı?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Dış mıntıka personelini yönlendir, 15 dk içinde süpürtüp yeniden kontrol et. Tekrar eden kirlilikte küllük konumunu gözden geçir." },
+  { text: "Küllükler boşaltıldı ve dış yüzeyleri temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Küllüğü boşalt, kum/çakıl haznesini elekle, dış gövdeyi sil. Yanık izi ve is birikmişse haftalık derin temizliğe yaz." },
+  { text: "Giriş paspasları temiz, kaymıyor ve altı kuru mu?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Paspası kaldırıp altını sildir, ıslaksa yedeği ile değiştir. Kenarı kalkan paspas düşme riskidir; değişim talebi aç." },
+  { text: "Bahçe çim alanı sulandı mı / otomatik sulama çalıştı mı?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Sulama yapılmadıysa peyzaj sorumlusunu ara, akşam serinliğinde sulama planla. Otomatik sistem arızalıysa teknik bakıma iş emri aç." },
+  { text: "Bahçe ve peyzaj alanı çöp, kuru yaprak ve izmaritten temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: true,
+    action: "Peyzaj alanını toplattır. Yaprak dökümü mevsimindeyse günlük iki toplama planla." },
+  { text: "Giriş kapı kolları ve dezenfektan standı dolu ve çalışır durumda mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Standı doldur, çalışmıyorsa yedeğiyle değiştir ve sarf talebi gir." },
+];
+const TEMIZLIK_OFIS_KAT_SORULARI = [
+  { text: "Asansör holü zemini süpürülmüş, lekesiz ve parlak mı?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Holü hemen paspaslat. Halı ise nokta leke çıkarıcı uygula, çıkmayan lekeyi aylık makineli yıkama listesine ekle." },
+  { text: "Asansör kapıları, kasaları ve butonları temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Paslanmaz spreyi ile sildir, kapı alt kanalını fırçalat. Butonları dezenfekte ettir." },
+  { text: "Kat koridoru ve ortak alan zemini temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Süpürme + paspaslama yaptır. Kiracıya ait alandan taşan kirlilikse kiracı temsilcisine bilgi ver." },
+  { text: "Kat camları, cam bölme ve kapı camları temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Cam silme programına al, el izi yoğun bölgeleri aynı gün nokta temizlikle sildir." },
+  { text: "Yangın merdiveni basamak, sahanlık ve korkulukları temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Merdiveni yukarıdan aşağıya süpürttür ve korkulukları sildir. Toz birikimi 1 haftadan eskiyse frekansı günlüğe çek." },
+  { text: "Yangın merdiveni ve kaçış yolunda çöp, koli veya bırakılmış malzeme yok mu?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Malzemeyi derhal kaldırt. Kaçış yolu işgali can güvenliği ihlalidir: fotoğrafla, İSG sorumlusuna aynı gün bildir, sahibi belliyse yazılı uyarı çıkar." },
+  { text: "Kat çöp kutuları boşaltıldı ve poşetleri değiştirildi mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Hemen boşalttır. Geri dönüşüm ayrımı bozulmuşsa kata bilgilendirme etiketi as." },
+  { text: "Kat WC'leri (varsa) temiz ve sarf malzemeleri tam mı?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Sarf malzemesini 15 dk içinde tamamlat, temizliği yenilet, kat kontrol kartına saat yazdır." },
+];
+const TEMIZLIK_TERAS_SORULARI = [
+  { text: "Teras zemini süpürülmüş; yaprak, izmarit ve çöp yok mu?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Zemini süpürttür. Rüzgârlı havada gün içinde ikinci tur planla." },
+  { text: "Teras giderleri ve süzgeçler açık, tıkalı değil mi?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Süzgeci hemen açtır. Tıkanıklık devam ediyorsa teknik bakıma iş emri aç; su birikmesi alt kata sızıntı riskidir." },
+  { text: "Bitkiler sulandı mı, toprak nemi yeterli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Sulama yaptır. Toprak çatlamışsa iki kademeli sulama uygula. Öğle güneşinde sulama yaptırma, akşama al." },
+  { text: "Kuru yaprak, solmuş dal ve saksı yüzeyleri temizlendi mi?", failOn: "Hayır", severity: "bilgi", photoRequired: true,
+    action: "Kuru dalları aldır, saksı dış yüzeyini sildir. Bitki kuruyorsa peyzaj firmasına değişim talebi aç." },
+  { text: "Teras masa, sandalye ve oturma grupları silinmiş mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Mobilyaları sildir; kuş pisliği varsa dezenfektanlı su ile temizlet." },
+  { text: "Teras küllükleri boşaltıldı ve temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Küllükleri boşalttır. Yanan izmarit riski nedeniyle su ile söndürtüp öyle boşalttır." },
+  { text: "Korkuluk cam panelleri ve metal aksam temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Cam panelleri sildir. Dış yüz erişilemiyorsa cephe ekibi programına ekle." },
+  { text: "Teras çıkış kapısı, eşiği ve paspası temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Eşik kanalını temizlet; kapı sızdırmazlığı bozuksa teknik bakıma bildir." },
+];
+const TEMIZLIK_OTOPARK_SORULARI = [
+  { text: "Otopark zemini süpürülmüş; yağ, toz ve döküntü yok mu?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Süpürtme yaptır. Yağ lekesi için talaş/emici döktür, ardından yağ çözücü ile temizlet. Kaynağı belli araca güvenlik üzerinden bilgi ver." },
+  { text: "Otopark asansör kapıları ve asansör holü temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Kapı ve kasayı sildir, hol zeminini paspaslat. Kapı eşiğindeki taş/toz asansör arızası yapar; kanalı mutlaka temizlet." },
+  { text: "Otopark çöp kutuları boş ve poşetli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Boşalttır. Kutu sık doluyorsa hacmi büyüt veya ikinci kutu konumlandır." },
+  { text: "Yaya yürüyüş yolu ve zemin işaretlemeleri görünür ve temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Yürüyüş yolunu temizlet. Boya solmuşsa teknik bakıma zemin işaretleme talebi aç." },
+  { text: "Gider ızgaraları ve su kanalları açık mı?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Izgarayı açtırıp temizlet. Koku veya geri tepme varsa teknik bakıma acil iş emri aç." },
+  { text: "Kolonlar, duvar dipleri ve yangın dolabı önleri temiz ve engelsiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Duvar diplerini süpürtür, yangın dolabı önündeki malzemeyi kaldırt ve İSG'ye bildir." },
+  // Kullanıcı teyidiyle referans dosyasındaki "(temiz ise Evet)" notu
+  // kafa karıştırıcı bir çifte-olumsuzlamaydı ("var mı?" sorusuna
+  // "temizse Evet de" demek) — app'in tüm listede tutarlı kullandığı
+  // "...temiz mi?" kalıbına (failOn Hayır) çevrilerek netleştirildi,
+  // anlam DEĞİŞMEDİ.
+  { text: "Otopark temiz, terk edilmiş malzeme/hurda/atık yok mu?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Malzemeyi fotoğrafla, güvenlikle sahibini tespit et, 24 saat içinde kaldırılmazsa atık alanına taşıt." },
+  { text: "Rampa, giriş bariyeri ve çevresi temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Rampayı süpürttür; yağış sonrası çamur birikmesi varsa basınçlı yıkama planla." },
+];
+const TEMIZLIK_B3_WC_SORULARI = [
+  { text: "Zemin temiz, kuru ve kaygan değil mi?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Zemini hemen temizletip kurulat, ıslak zemin levhası koydur. Kalıcı su birikmesi varsa gider tıkanıklığı için teknik bakıma bildir." },
+  { text: "Klozet ve pisuarlar temiz, kireç ve leke yok mu?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Kireç çözücü ile ovdur, 15 dk içinde yeniden kontrol et. Kalıcı kireç için haftalık asit bazlı derin temizlik planla." },
+  { text: "Lavabo, armatür ve tezgah temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Tezgahı sildir, armatür kirecini çözdür, sifon altını kontrol ettir." },
+  { text: "Aynalar leke ve su izi olmadan temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Cam suyu + mikrofiber ile sildir, kenar silikon köşelerini kurulat." },
+  { text: "Sıvı sabun hazneleri dolu mu?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "15 dk içinde doldurt. Yedek stok yoksa depodan talep gir ve stok minimum seviyesini yükselt." },
+  { text: "Tuvalet kağıdı tüm kabinlerde tam ve yedekli mi?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "15 dk içinde tamamlat, her kabine bir yedek rulo bıraktır." },
+  { text: "Kağıt havlu üniteleri dolu mu?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "15 dk içinde doldurt. Ünite sıkışıyorsa değişim talebi aç, elde havlu bırakma." },
+  { text: "Çöp kutuları boşaltıldı ve poşetleri değiştirildi mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Boşalttır, kapak ve pedalı sildir, koku önleyici tablet koydur." },
+  { text: "Ortam kokusu iyi, havalandırma çalışıyor mu?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Havalandırma menfezini kontrol ettir; fan çalışmıyorsa teknik bakıma acil iş emri aç. Geçici olarak koku giderici uygula ama kaynağı kapatma." },
+  { text: "Kabin kapıları, kilitler ve askılar sağlam ve temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Kapıyı sildir; kilit/askı arızası varsa teknik bakıma iş emri aç ve kabini geçici olarak kapat." },
+  { text: "Kontrol kartı imzalandı / dijital kayıt girildi mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kartı anında doldurt. İmzasız tur yapılmamış sayılır; personele hatırlatma yap ve tekrarında tutanak tut." },
+];
+const TEMIZLIK_YONETIM_OFIS_SORULARI = [
+  { text: "Ofis masaları ve çalışma yüzeyleri tozsuz mu?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Yüzeyleri sildir. Evrak yoğunluğu nedeniyle silinemeyen masalar için kullanıcıdan masa boşaltma günü iste." },
+  { text: "Ofis zemini süpürüldü / halı temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Süpürgeyi masa altlarını kapsayacak şekilde çektir. Halı lekesini nokta temizlikle çıkart." },
+  { text: "Çöp kutuları boşaltıldı mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Boşalttır, kağıt/evsel ayrımını kontrol et." },
+  { text: "Mutfak tezgahı ve evye temiz, kireçsiz mi?", failOn: "Hayır", severity: "takip", photoRequired: true,
+    action: "Tezgahı ve evyeyi ovdur, kireç çözücü uygulat, süzgeci temizlet." },
+  { text: "Bulaşıklar yıkandı / makine boşaltıldı mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Bulaşıkları aldır. Gün sonu bırakılan bulaşık haşere riskidir; mutfak kullanım kuralını panoya as." },
+  { text: "Mikrodalga, su sebili ve kahve makinesi temiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "İç ve dış yüzeyleri sildir. Su sebili damlalığını boşalttır, aylık dezenfeksiyon tarihini kontrol et." },
+  { text: "Buzdolabı dış yüzeyi silindi, içinde bozulmuş ürün yok mu?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Cuma temizliği uygula: tarihi geçmiş ürünler için 24 saat önceden bilgilendirme notu as, sonra çıkart." },
+  { text: "Mutfak sarf malzemeleri (bulaşık deterjanı, sünger, kağıt havlu, çöp poşeti) yeterli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Depodan tamamlat; stok minimumun altındaysa aynı gün satın alma talebi gir." },
+  { text: "Yönetim WC zemin, klozet ve lavabo temiz mi?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Hemen temizlet ve kurulat, kontrol kartına saat yazdır." },
+  { text: "Yönetim WC sarf malzemeleri (sabun, tuvalet kağıdı, havlu) tam mı?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "15 dk içinde tamamlat, yedek stok bıraktır." },
+  { text: "Toplantı odası masası, sandalyeleri ve ekranı toplantıya hazır mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Odayı toplat, bardakları kaldırt, masayı sildir. Toplantıdan 30 dk önce ikinci kontrol yap." },
+  { text: "Cam bölmeler ve kapı camları temiz mi?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Cam silme programına al; kapı kolu çevresini aynı gün sildir." },
+];
+// M2 "Ofis Katları" — kullanıcının referans dosyasında AYNI 8 soru 1-20.
+// katların HEPSİNE uygulanıyor ("1–20. katların tamamı aynı sette kontrol
+// edilir") — TEKNIK_AYLIK_PERFLOOR'daki mtm_exit (Exit Armatürü) ile AYNI
+// "kat başına çoğalt" deseni (bkz. yukarısı).
+const TEMIZLIK_OFIS_KATLARI_LOCATIONS = Array.from({ length: 20 }, (_, i) => String(i + 1)).map((floor) => ({
+  key: `ofis_kat_${floor}`, label: `${floorPhrase(floor)} — Ofis Katı`, floorLabel: floor,
+  assetDesc: `${floorPhrase(floor)} asansör holü, koridor ve yangın merdiveni`,
+  questions: TEMIZLIK_OFIS_KAT_SORULARI,
+}));
+
 // Güvenlik kat devriyesi — kullaıncı teyidiyle: "katların kapısı açık kapalı
 // kontrolünü yapsınlar holleri genel kontrol edecekler". Otopark katlarında
 // (2B-6B) ofis/kapı kavramı yok, onun yerine aydınlatma + teknik oda erişim
@@ -912,14 +1076,20 @@ export const MAHAL_POINTS = [
   // ---- TEMİZLİK — TEK mahal kontrolü, çok konum — kullanıcı teyidiyle:
   // "Temizliğin Mahal kontrolü tek olacak. ayrı yaptığın mahalleri tek
   // mahale ekle" (eskiden mp5/mp6/mp7/mp22/mp23/mp24/mp25 diye 7 ayrı kart
-  // vardı). groupByFloor:false — bu konumlar (Lobi, WC, Otopark, Bahçe,
-  // Teraslar) fire-equipment örneğindeki gibi kat başına çoğullanmıyor,
-  // zaten her biri kendi başına tek bir mahal, o yüzden düz liste (bkz.
-  // PerFloorCard). Her location kendi questions'ını taşır (mahal tipine göre
-  // farklı — WC ile teras aynı checklist'i paylaşmaz), point.questions genel
-  // fallback. Not: "Otopark ve Ortak Merdivenler" eskiden Haftalık'tı, tek
-  // mahalde tüm konumlar aynı periyodu (Günlük) paylaştığı için o da Günlük'e
-  // alındı.
+  // vardı). groupByFloor:false — bu konumlar fire-equipment örneğindeki gibi
+  // kat başına çoğullanmıyor (Ofis Katları hariç — o da kendi
+  // TEMIZLIK_OFIS_KATLARI_LOCATIONS'ında ZATEN 1-20 için ayrı ayrı
+  // çoğaltıldı), zaten her biri kendi başına tek bir mahal, o yüzden düz
+  // liste (bkz. PerFloorCard). Her location kendi questions'ını taşır (mahal
+  // tipine göre farklı — WC ile teras aynı checklist'i paylaşmaz),
+  // point.questions genel fallback.
+  //
+  // Kullanıcı teyidiyle (temizlik-kontrol-listesi.html referansı): "ekteki
+  // soruları katlara göre yerleştir" — Lobi/Giriş (Zemin, bahçe dahil, 15
+  // soru), Ofis Katları (1-20, her katta AYNI 8 soru), Teras (5. ve 20. kat,
+  // 8 soru), Otopark (2B ve 3B, 8 soru), B3 Ortak WC (11 soru), Yönetim
+  // Ofisi (1B, 12 soru) — tüm sorular ve olumsuz-cevap aksiyonları
+  // yukarıdaki TEMIZLIK_* sabitlerinden geliyor.
   {
     id: "mtd_temizlik", department: "Temizlik", name: "Mahal Kontrol", assetId: "",
     assetDesc: "Kat/alan bazlı temizlik kontrol listesi — kontrol edilecek alanı seçin", period: "Günlük",
@@ -927,62 +1097,39 @@ export const MAHAL_POINTS = [
     locations: [
       {
         key: "lobi", label: "Lobi / Giriş Katı", floorLabel: "Zemin",
-        assetDesc: "Ana giriş, resepsiyon ve zemin kat ortak alanları",
-        questions: [
-          { text: "Zemin temiz ve kuru mu?", failOn: "Hayır" },
-          { text: "Cam ve aynalar temiz mi?", failOn: "Hayır" },
-          { text: "Çöp kutuları boşaltıldı mı?", failOn: "Hayır" },
-        ],
+        assetDesc: "Ana giriş, resepsiyon, dış mıntıka ve bahçe/peyzaj alanları",
+        questions: TEMIZLIK_LOBI_SORULARI,
       },
+      ...TEMIZLIK_OFIS_KATLARI_LOCATIONS,
       {
-        key: "ofis_wc", label: "Ofis Katları — WC/Mutfak",
-        assetDesc: "Kat ofisleri ıslak hacim ve mutfak alanları (genel, her kat için uygulanır)",
-        questions: [
-          { text: "Sarf malzeme (sabun, kağıt havlu) dolu mu?", failOn: "Hayır" },
-          { text: "Koku/hijyen sorunu var mı?", failOn: "Evet" },
-          { text: "Zemin ve armatürler temiz mi?", failOn: "Hayır" },
-        ],
-      },
-      {
-        key: "otopark", label: "Otopark ve Ortak Merdivenler", floorLabel: "2B",
-        assetDesc: "Kapalı otopark katları (2B-6B) ve acil merdiven kovaları",
-        questions: [
-          { text: "Zemin ve duvarlar temiz mi?", failOn: "Hayır" },
-          { text: "Atık/moloz birikimi var mı?", failOn: "Evet" },
-        ],
-      },
-      {
-        key: "yonetim_wc", label: "Yönetim Odası WC (Bay/Bayan)", floorLabel: "1B",
-        assetDesc: "Yönetim Odası içindeki WC Bay ve WC Bayan",
-        questions: [
-          { text: "Sarf malzeme (sabun, kağıt havlu) dolu mu?", failOn: "Hayır" },
-          { text: "Koku/hijyen sorunu var mı?", failOn: "Evet" },
-          { text: "Zemin ve armatürler temiz mi?", failOn: "Hayır" },
-        ],
-      },
-      {
-        key: "bahce", label: "Bahçe (Zemin Ortak Alan)", floorLabel: "Zemin",
-        assetDesc: "Zemin kat dış bahçe/otopark giriş alanı",
-        questions: [
-          { text: "Çevre temiz, yaprak/çöp birikimi yok mu?", failOn: "Hayır" },
-          { text: "Peyzaj/bitki alanları düzenli mi?", failOn: "Hayır" },
-        ],
-      },
-      {
-        key: "teras20", label: "20. Teras (Ortak Alan)", floorLabel: "20",
-        assetDesc: "20. kat teras ortak alanı",
-        questions: [
-          { text: "Zemin temiz mi?", failOn: "Hayır" },
-          { text: "Su birikintisi/tıkalı gider var mı?", failOn: "Evet" },
-        ],
-      },
-      {
-        key: "teras5", label: "5. Teras (Ortak Alan)", floorLabel: "5",
+        key: "teras5", label: "5. Kat Terası (Ortak Alan)", floorLabel: "5",
         assetDesc: "5. kat teras ortak alanı",
-        questions: [
-          { text: "Zemin temiz mi?", failOn: "Hayır" },
-          { text: "Su birikintisi/tıkalı gider var mı?", failOn: "Evet" },
-        ],
+        questions: TEMIZLIK_TERAS_SORULARI,
+      },
+      {
+        key: "teras20", label: "20. Kat Terası (Ortak Alan)", floorLabel: "20",
+        assetDesc: "20. kat teras ortak alanı",
+        questions: TEMIZLIK_TERAS_SORULARI,
+      },
+      {
+        key: "otopark_2b", label: "B2 Otopark", floorLabel: "2B",
+        assetDesc: "B2 kapalı otopark katı ve ortak merdivenler",
+        questions: TEMIZLIK_OTOPARK_SORULARI,
+      },
+      {
+        key: "otopark_3b", label: "B3 Otopark", floorLabel: "3B",
+        assetDesc: "B3 kapalı otopark katı ve ortak merdivenler",
+        questions: TEMIZLIK_OTOPARK_SORULARI,
+      },
+      {
+        key: "b3_ortak_wc", label: "B3 Ortak WC", floorLabel: "3B",
+        assetDesc: "B3 katı ortak kullanım tuvaleti — en sık şikâyet alınan mıntıka",
+        questions: TEMIZLIK_B3_WC_SORULARI,
+      },
+      {
+        key: "yonetim_ofis", label: "Yönetim Ofisi (Ofis + Mutfak + WC)", floorLabel: "1B",
+        assetDesc: "Yönetim ofisi, mutfak ve Yönetim Odası WC (Bay/Bayan)",
+        questions: TEMIZLIK_YONETIM_OFIS_SORULARI,
       },
     ],
   },
@@ -1453,6 +1600,24 @@ export function migrateLegacyState(state) {
         return p;
       });
       if (changed) next = { ...next, mahalPoints: points };
+    }
+  }
+  // Kullanıcı teyidiyle (temizlik-kontrol-listesi.html referansı): "ekteki
+  // soruları katlara göre yerleştir... olumsuz cevaplara karşı sorularıda
+  // oluştur ve arka planda sakla" — mtd_temizlik'in konum/soru listesi
+  // baştan yazıldı (Lobi 15 soru, Ofis Katları 1-20 ayrı ayrı, Teras/
+  // Otopark/B3 WC/Yönetim Ofisi genişletildi + her soruya özel `action`
+  // metni). Zaten Firestore'a persist edilmiş ESKİ kayıtta hâlâ eski dar
+  // location seti (7 konum, "ofis_kat_1" gibi yeni bir anahtar YOK) varsa —
+  // idempotent, MAHAL_POINTS'teki mtd3/mtd4 senkronuyla AYNI desen —
+  // güncel haliyle değiştirilir.
+  if (Array.isArray(next.mahalPoints)) {
+    const freshTemizlik = MAHAL_POINTS.find((p) => p.id === "mtd_temizlik");
+    const idx = next.mahalPoints.findIndex((p) => p.id === "mtd_temizlik");
+    if (freshTemizlik && idx !== -1 && !(next.mahalPoints[idx].locations || []).some((l) => l.key === "ofis_kat_1")) {
+      const points = [...next.mahalPoints];
+      points[idx] = { ...points[idx], locations: freshTemizlik.locations, perFloor: freshTemizlik.perFloor, groupByFloor: freshTemizlik.groupByFloor, assetDesc: freshTemizlik.assetDesc };
+      next = { ...next, mahalPoints: points };
     }
   }
   // Güvenlik ağı: newUnitId()'nin modül içi sayacı sayfa yenilendiğinde

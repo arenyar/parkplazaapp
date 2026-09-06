@@ -150,3 +150,21 @@ export function getOfflineGuidance(question, asset) {
     brandNote: brandText ? { manufacturer: asset.manufacturer, text: brandText } : null,
   };
 }
+
+// Kullanıcı teyidiyle (temizlik-kontrol-listesi.html referansı): "olumsuz
+// cevaplara karşı sorularıda oluştur ve arka planda sakla" — bazı sorular
+// (bkz. mockData.js questions[].action, ör. TEMIZLIK_* sabitleri) artık
+// KENDİ, o maddeye özgü aksiyon metnini taşıyor — bu, yukarıdaki PATTERNS
+// genel desen kütüphanesinden DAHA SPESİFİK olduğu için varsa ona öncelik
+// verilir (custom:true, tek akıcı `text`); yoksa (ör. çoğu Teknik sorusu)
+// genel desen kütüphanesine düşülür (custom:false, possibleCauses/
+// firstActions listesi — bkz. getOfflineGuidance). Tek çağrı noktası —
+// hem klasik form (MahalKontrol.jsx) hem AI checklist (AiChecklistChat.jsx)
+// bunu kullanır, iki ayrı "hangisi öncelikli" mantığı tekrar edilmez.
+export function resolveGuidance(question, asset) {
+  if (question?.action) {
+    return { custom: true, text: question.action, severity: question.severity || "takip", photoRequired: !!question.photoRequired };
+  }
+  const generic = getOfflineGuidance(question, asset);
+  return generic ? { custom: false, ...generic } : null;
+}

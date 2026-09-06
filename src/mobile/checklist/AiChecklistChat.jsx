@@ -3,7 +3,7 @@ import { X, Sparkles, ShieldAlert, Camera } from "lucide-react";
 import { useTheme } from "../../lib/ThemeContext.jsx";
 import { Card, Button, Input } from "../../components/ui.jsx";
 import { FillModal, buildMahalFillPatch, buildOfflineMarkPatch, startMahalRun, runFor, resolveMeters } from "../../pages/MahalKontrol.jsx";
-import { getOfflineGuidance } from "../../lib/offlineGuidance.js";
+import { resolveGuidance } from "../../lib/offlineGuidance.js";
 import { uploadPhoto } from "../../lib/storage.js";
 
 const SEVERITY_LABEL = { bilgi: "Bilgi", takip: "Takip Gerekli", acil: "ACİL" };
@@ -127,7 +127,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     setAnswers((a) => ({ ...a, [qIndex]: value }));
     setDraft("");
     if (isFail(q, value)) {
-      const guidance = getOfflineGuidance(q, activeAsset);
+      const guidance = resolveGuidance(q, activeAsset);
       if (guidance) { setPendingGuidance(guidance); setMode("guidance"); return; }
     }
     goNext();
@@ -157,7 +157,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
       .map((q, i) => ({ q, i, value: answers[i] }))
       .filter(({ q, value }) => isFail(q, value));
     if (fails.length === 0) return { summary: "Tüm maddeler uygun.", severity: "bilgi", fails: [] };
-    const severities = fails.map(({ q }) => getOfflineGuidance(q, activeAsset)?.severity).filter(Boolean);
+    const severities = fails.map(({ q }) => resolveGuidance(q, activeAsset)?.severity).filter(Boolean);
     const severity = severities.includes("acil") ? "acil" : severities.includes("takip") ? "takip" : "bilgi";
     const summary = `${fails.length} maddede uygunsuzluk: ${fails.map(({ q }) => q.text).join(", ")}`;
     return { summary, severity, fails };
@@ -281,15 +281,27 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
           {mode === "guidance" && pendingGuidance && (
             <div>
               <div style={{ padding: "10px 12px", borderRadius: 10, background: `${guidanceColor}12`, border: `1px solid ${guidanceColor}33`, marginBottom: 14 }}>
-                {pendingGuidance.escalate && (
-                  <div style={{ fontSize: 10.5, fontWeight: 800, color: guidanceColor, marginBottom: 6, textTransform: "uppercase" }}>
-                    {pendingGuidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}
-                  </div>
-                )}
-                <div style={{ fontSize: 12.5, color: T.ink }}><b>Olası neden:</b> {pendingGuidance.possibleCauses.join(", ")}</div>
-                <div style={{ fontSize: 12.5, color: T.ink, marginTop: 4 }}><b>İlk aksiyon:</b> {pendingGuidance.firstActions.join(" · ")}</div>
-                {pendingGuidance.brandNote && (
-                  <div style={{ fontSize: 12, color: T.ink, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${guidanceColor}33` }}><b>{pendingGuidance.brandNote.manufacturer} notu:</b> {pendingGuidance.brandNote.text}</div>
+                {pendingGuidance.custom ? (
+                  <>
+                    {pendingGuidance.severity === "acil" && (
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: guidanceColor, marginBottom: 6, textTransform: "uppercase" }}>⚠ Acil — sorumluyu arayın</div>
+                    )}
+                    <div style={{ fontSize: 12.5, color: T.ink }}>{pendingGuidance.text}</div>
+                    {pendingGuidance.photoRequired && <div style={{ fontSize: 11, color: guidanceColor, marginTop: 6, fontWeight: 700 }}>Fotoğraf zorunlu.</div>}
+                  </>
+                ) : (
+                  <>
+                    {pendingGuidance.escalate && (
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: guidanceColor, marginBottom: 6, textTransform: "uppercase" }}>
+                        {pendingGuidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12.5, color: T.ink }}><b>Olası neden:</b> {pendingGuidance.possibleCauses.join(", ")}</div>
+                    <div style={{ fontSize: 12.5, color: T.ink, marginTop: 4 }}><b>İlk aksiyon:</b> {pendingGuidance.firstActions.join(" · ")}</div>
+                    {pendingGuidance.brandNote && (
+                      <div style={{ fontSize: 12, color: T.ink, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${guidanceColor}33` }}><b>{pendingGuidance.brandNote.manufacturer} notu:</b> {pendingGuidance.brandNote.text}</div>
+                    )}
+                  </>
                 )}
               </div>
               <Button onClick={acknowledgeGuidance} style={{ width: "100%" }}>Gördüm, Devam Et</Button>

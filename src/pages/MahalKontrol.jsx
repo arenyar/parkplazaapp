@@ -17,7 +17,7 @@ import { locationLabel, collectFireEquipmentLocations, floorPhrase, firmsAtFloor
 import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
 import { uploadPhoto, uploadDataUrl } from "../lib/storage.js";
 import { turKey, buildTurPlan, buildTurPlanForPoint, findActiveTur, startTurPatch, markVisitedPatch, nextExpectedIndex, markSkippedPatch, closeTurPatch, turSummary, staleOpenTurs, PATROL_ESTIMATED_MINUTES, PATROL_TOLERANCE_MINUTES } from "../lib/mahalTur.js";
-import { getOfflineGuidance } from "../lib/offlineGuidance.js";
+import { resolveGuidance } from "../lib/offlineGuidance.js";
 import { requestMahalQuestions } from "../lib/mahalQuestionGen.js";
 
 function emptyPoint(department) {
@@ -885,16 +885,26 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
               <div style={{ fontSize: 11, color: "#DC5A34", marginTop: 4, fontWeight: 600 }}>Bu madde için not zorunlu — aşağıya kısaca açıklayın.</div>
             )}
             {q.type !== "sayi" && answers[i] === q.failOn && (() => {
-              const guidance = getOfflineGuidance(q, activeAsset);
+              const guidance = resolveGuidance(q, activeAsset);
               if (!guidance) return null;
               const color = guidance.severity === "acil" ? "#DC5A34" : guidance.severity === "takip" ? "#B4551E" : "#6E7671";
               return (
                 <div style={{ marginTop: 6, padding: "8px 10px", borderRadius: 8, background: `${color}12`, border: `1px solid ${color}33` }}>
-                  {guidance.escalate && <div style={{ fontSize: 10.5, fontWeight: 800, color, marginBottom: 4, textTransform: "uppercase" }}>{guidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}</div>}
-                  <div style={{ fontSize: 11, color: "#132A20" }}><b>Olası neden:</b> {guidance.possibleCauses.join(", ")}</div>
-                  <div style={{ fontSize: 11, color: "#132A20", marginTop: 2 }}><b>İlk aksiyon:</b> {guidance.firstActions.join(" · ")}</div>
-                  {guidance.brandNote && (
-                    <div style={{ fontSize: 11, color: "#132A20", marginTop: 4, paddingTop: 4, borderTop: `1px solid ${color}33` }}><b>{guidance.brandNote.manufacturer} notu:</b> {guidance.brandNote.text}</div>
+                  {guidance.custom ? (
+                    <>
+                      {guidance.severity === "acil" && <div style={{ fontSize: 10.5, fontWeight: 800, color, marginBottom: 4, textTransform: "uppercase" }}>⚠ Acil — sorumluyu arayın</div>}
+                      <div style={{ fontSize: 11, color: "#132A20" }}>{guidance.text}</div>
+                      {guidance.photoRequired && <div style={{ fontSize: 10.5, color, marginTop: 4, fontWeight: 700 }}>Fotoğraf zorunlu.</div>}
+                    </>
+                  ) : (
+                    <>
+                      {guidance.escalate && <div style={{ fontSize: 10.5, fontWeight: 800, color, marginBottom: 4, textTransform: "uppercase" }}>{guidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}</div>}
+                      <div style={{ fontSize: 11, color: "#132A20" }}><b>Olası neden:</b> {guidance.possibleCauses.join(", ")}</div>
+                      <div style={{ fontSize: 11, color: "#132A20", marginTop: 2 }}><b>İlk aksiyon:</b> {guidance.firstActions.join(" · ")}</div>
+                      {guidance.brandNote && (
+                        <div style={{ fontSize: 11, color: "#132A20", marginTop: 4, paddingTop: 4, borderTop: `1px solid ${color}33` }}><b>{guidance.brandNote.manufacturer} notu:</b> {guidance.brandNote.text}</div>
+                      )}
+                    </>
                   )}
                 </div>
               );
