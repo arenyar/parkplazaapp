@@ -34,6 +34,15 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   const activeLocation = queue[activeIndex] ?? null;
   const questions = activeLocation?.questions || point.questions;
   const activeAsset = locations ? (state.assets || []).find((a) => a.id === (activeLocation?.assetId || point.assetId)) : asset;
+  const team = state.team.filter((tm) => tm.department === department);
+  // Kullanıcı teyidiyle: "personel kendi kullanıcı ile giriş yaptığında tüm
+  // formlarda personel seçiminde işi yapan kendi olmalı eğer farklı kişi
+  // ekleyecekse girebilsin" — klasik FillModal'daki AYNI "Kontrolü yapan"
+  // deseni: giriş yapan kişiye varsayılan olarak ayarlanır (bkz. aşağıdaki
+  // useState), ama farklı biri check'i yapıyorsa değiştirilebilir. Kuyruk
+  // boyunca (bir ekipmandan diğerine geçerken) SIFIRLANMAZ — genelde aynı
+  // teknisyen odadaki tüm ekipmanları tek seferde geziyor.
+  const [inspector, setInspector] = useState(currentUser || "");
   // "offcheck" — kullanıcı teyidiyle: "bakım anında ekipmanlardan biri kapalı
   // olabilir kapalı olanları için sistem kapalı işareti koy... bu mantık tüm
   // kontroller için geçerli" — AI'ya sorulmadan (ağ gerektirmez, anında),
@@ -74,7 +83,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   }
 
   function markOff() {
-    updateState(buildOfflineMarkPatch(state, point, activeLocation, { inspector: currentUser }));
+    updateState(buildOfflineMarkPatch(state, point, activeLocation, { inspector }));
     advance();
   }
 
@@ -179,7 +188,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   function submitFillFromAi() {
     const answers = buildInitialAnswersForClassic();
     const note = current?.diagnosis?.summary || "";
-    let patch = buildMahalFillPatch(state, point, activeLocation, { inspector: currentUser, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
+    let patch = buildMahalFillPatch(state, point, activeLocation, { inspector, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
     if (patch.mahalRuns) {
       patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (activeLocation?.key || null) ? { ...r, verifiedBy: "qr", aiAssisted: true } : r)) };
     }
@@ -192,7 +201,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
       <FillModal point={point} location={activeLocation} shift={null}
         meters={resolveMeters(state, point, activeLocation)} state={state}
         run={runFor(point, state.mahalRuns, activeLocation?.key || null, null)}
-        team={state.team.filter((tm) => tm.department === department)} currentUser={currentUser} assets={state.assets}
+        team={team} currentUser={inspector} assets={state.assets}
         initialAnswers={buildInitialAnswersForClassic()}
         onSubmit={(payload) => {
           let patch = buildMahalFillPatch(state, point, activeLocation, payload);
@@ -226,9 +235,23 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
             {sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}
           </div>
 
+          {/* Kullanıcı teyidiyle: "personel kendi kullanıcı ile giriş
+              yaptığında tüm formlarda personel seçiminde işi yapan kendi
+              olmalı eğer farklı kişi ekleyecekse girebilsin" — klasik
+              FillModal'daki AYNI "Kontrolü yapan" alanı, aynı kopyayla. */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 6 }}>Kontrolü yapan</label>
+            <select value={inspector} onChange={(e) => setInspector(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontSize: 13.5, color: T.ink, background: T.surface }}>
+              <option value="">Personel seçin</option>
+              {team.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+            </select>
+          </div>
+
+          {!inspector && <p style={{ fontSize: 12, color: T.dimmer, fontStyle: "italic" }}>Kontrole başlamak için önce kontrolü yapan personeli seçin.</p>}
+
           {fallbackNotice && <div style={{ fontSize: 11.5, color: "#DC5A34", marginBottom: 8 }}>{fallbackNotice}</div>}
 
-          {mode === "offcheck" && (
+          {inspector && mode === "offcheck" && (
             <div>
               <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>Bu ekipman şu an kapalı/devre dışı mı?</p>
               <div style={{ display: "flex", gap: 8 }}>
