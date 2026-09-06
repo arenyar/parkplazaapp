@@ -114,11 +114,39 @@ const PATTERNS = [
   },
 ];
 
+// Kullanıcı teyidiyle: "teknik ofline yapı için marka modellere göre
+// kütüphane seviyeni geliştir" — yukarıdaki PATTERNS jenerik arıza
+// desenleri (basınç, sızıntı, titreşim vb.) için; BRAND_NOTES ise bunun
+// ÜZERİNE, o maddenin bağlı olduğu varlığın GERÇEK `manufacturer` alanına
+// (bkz. mockData.js expandInstances kayıtları — uydurma değil, projedeki
+// gerçek varlık verisi) göre EK bir marka notu ekler. Bu notlar üretici
+// SERVİS KILAVUZUNUN yerine geçmez (bina/markaya özel gizli bir prosedür
+// içermez) — bir tesis bakım mühendisinin bu ürün AİLESİ hakkında zaten
+// bilebileceği, yaygın/genel endüstri bilgisidir (ör. "döküm gövdeli
+// kazanlarda düşük dönüş suyu sıcaklığı yoğuşma/korozyon yapar" gibi).
+// Marka eşleşmesi yoksa (BRAND_NOTES'ta tanımlı değil veya asset hiç
+// verilmemiş) sessizce atlanır — uydurma bir marka notu ÜRETİLMEZ.
+const BRAND_NOTES = {
+  Viessmann: "Döküm gövdeli (Paromat tipi) kazanlarda en sık aksama düşük dönüş suyu sıcaklığında çalıştırılıp gövdede yoğuşma/korozyon oluşmasıdır — dönüş suyu sıcaklığının üretici alt sınırının üzerinde tutulduğundan emin olun.",
+  Weishaupt: "Arıza lambası yanınca ilk adım genelde brülör kumanda kutusundaki (genelde kırmızı, şeffaf kapaklı) reset düğmesine BİR KEZ basmaktır — art arda resetlemeyin (kalıcı arızayı maskeleyebilir); ısrarla tekrar veriyorsa servisi arayın.",
+  York: "Ani kapasite düşüşünün sık nedeni yüksek basınç (high-head) koruma trip'idir — kondenser tarafında (hava/su) tıkanıklık veya kirli batarya/plaka olup olmadığını kontrol edin.",
+  "Alfa Laval": "Performans düşüşünün sık nedeni plaka yüzeyinde kireç/kir birikimidir (ısı transferi azalır); sızıntı genelde plaka contalarında (gasket) başlar.",
+};
+
 // `question` — bkz. mahalPoints[].questions eleman şekli ({text, failOn,
 // type, unit, ...}). En spesifik desenden genele doğru sırayla denenir,
 // İLK eşleşen döner. Hiçbiri eşleşmezse `null` — zorla bir şey uydurulmaz.
-export function getOfflineGuidance(question) {
+// `asset` — opsiyonel (bkz. state.assets eleman şekli, {manufacturer, ...}).
+export function getOfflineGuidance(question, asset) {
   if (!question?.text) return null;
   const pattern = PATTERNS.find((p) => p.match.test(question.text));
-  return pattern ? { possibleCauses: pattern.possibleCauses, firstActions: pattern.firstActions, severity: pattern.severity, escalate: pattern.escalate } : null;
+  if (!pattern) return null;
+  const brandText = asset?.manufacturer && BRAND_NOTES[asset.manufacturer];
+  return {
+    possibleCauses: pattern.possibleCauses,
+    firstActions: pattern.firstActions,
+    severity: pattern.severity,
+    escalate: pattern.escalate,
+    brandNote: brandText ? { manufacturer: asset.manufacturer, text: brandText } : null,
+  };
 }

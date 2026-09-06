@@ -16,16 +16,28 @@
 // assetId+assetIds deseni). `assetId` geriye dönük uyumluluk için birincil
 // olarak kalıyor, eşleşme artık ikisinde de aranıyor — bir odadaki HERHANGİ
 // bir ekipmanın QR'ı okutulunca AYNI paylaşılan kontrol noktasına düşer.
+// mtd3/mtd4 gibi ekipman-bazlı gruplu mahallerde (bkz. mockData.js
+// locations) her ekipmanın kendi `location.assetId`'si var — kullanıcı
+// teyidiyle: "Kazan 2'nin QR'ı okutulunca doğrudan Kazan 2'nin sorularının
+// açılması gerekiyor", bu yüzden eşleşme artık point.locations[] içinde de
+// aranıyor ve hangi location eşleştiği (`matchedLocationKey`) döndürülüyor.
 export function resolveAssetScan(state, assetId) {
   if (!assetId) return null;
   const asset = (state.assets || []).find((a) => a.id === assetId && !a.archived);
   if (!asset) return null;
-  const point = (state.mahalPoints || []).find((p) => p.assetId === asset.id || (p.assetIds || []).includes(asset.id));
+  let matchedLocationKey = null;
+  const point = (state.mahalPoints || []).find((p) => {
+    if (p.assetId === asset.id || (p.assetIds || []).includes(asset.id)) return true;
+    const loc = (p.locations || []).find((l) => l.assetId === asset.id);
+    if (loc) { matchedLocationKey = loc.key; return true; }
+    return false;
+  });
   return {
     assetId: asset.id,
     assetName: asset.name,
     department: point?.department || "Teknik",
     matchedPointId: point?.id || null,
     matchedPointFloorLabel: point?.floorLabel || null,
+    matchedLocationKey,
   };
 }

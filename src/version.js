@@ -12,4 +12,4 @@
 // bunu canlı senkrondan görüp bir güncelleme uyarısı gösterir (bkz.
 // MobileApp.jsx UpdateBanner). Sıralamanın doğru çalışması için biçim HER
 // ZAMAN "YYYY.MM.DD.N" (artan, sözlük sırasıyla karşılaştırılabilir).
-export const APP_VERSION = "2026.09.06.5";
+export const APP_VERSION = "2026.09.06.6";

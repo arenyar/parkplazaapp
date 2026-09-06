@@ -336,7 +336,12 @@ export function buildMahalFillPatch(state, point, location, { inspector, answers
       id: `t_${Date.now()}`, ticketNo: nextNo, department: point.department, issueType: "Mahal Kontrol",
       category: point.department === "Teknik" ? "Arıza Bakım" : "", priority: "Yüksek", status: "Yapılacak",
       description: `${pointLabel} kontrolünde sorun tespit edildi: ${failed.join(", ")}`,
-      requester: inspector, assignee: "", createdAt: new Date().toISOString(), dueDate: "", assetId: point.assetId || "",
+      // Ekipman-bazlı gruplarda (bkz. mockData.js mtd3/mtd4 locations) her
+      // grubun kendi assetId'si var — kullanıcı teyidiyle: "içlerinden biri
+      // arızalı olduğunda ona özel bir veri olabilmeli". Bu yüzden arıza
+      // kaydı önce location'ın kendi assetId'sine, yoksa (Genel gibi ortak
+      // gruplar veya perFloor olmayan mahaller için) point'in assetId'sine bağlanır.
+      requester: inspector, assignee: "", createdAt: new Date().toISOString(), dueDate: "", assetId: location?.assetId || point.assetId || "",
       mahalPointId: point.id, locationKey: location?.key,
     };
     tasks = [...state.tasks, task];
@@ -493,6 +498,13 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
   // bu form açıldığı an "kontrole başlangıç" kabul edilir (useState
   // initializer ile bir kez, her re-render'da değil).
   const [startedAt] = useState(() => new Date().toISOString());
+  // Kullanıcı teyidiyle: "teknik ofline yapı için marka modellere göre
+  // kütüphane seviyeni geliştir" — offlineGuidance artık soru metnindeki
+  // genel arıza desenine EK olarak, o maddenin bağlı olduğu GERÇEK
+  // varlığın (bkz. mockData.js expandInstances PP-013/014/015/034/035/036
+  // — Viessmann/Weishaupt/Alfa Laval/York) `manufacturer` alanına göre bir
+  // marka notu da ekleyebiliyor (bkz. lib/offlineGuidance.js BRAND_NOTES).
+  const activeAsset = (assets || []).find((a) => a.id === (location?.assetId || point.assetId));
   const [inspector, setInspector] = useState(currentUser || "");
   const [answers, setAnswers] = useState(() => initialAnswers || {});
   const [note, setNote] = useState("");
@@ -745,7 +757,7 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
               <div style={{ fontSize: 11, color: "#DC5A34", marginTop: 4, fontWeight: 600 }}>Bu madde için not zorunlu — aşağıya kısaca açıklayın.</div>
             )}
             {q.type !== "sayi" && answers[i] === q.failOn && (() => {
-              const guidance = getOfflineGuidance(q);
+              const guidance = getOfflineGuidance(q, activeAsset);
               if (!guidance) return null;
               const color = guidance.severity === "acil" ? "#DC5A34" : guidance.severity === "takip" ? "#B4551E" : "#6E7671";
               return (
@@ -753,6 +765,9 @@ export function FillModal({ point, location, shift, meters, state, run, team, cu
                   {guidance.escalate && <div style={{ fontSize: 10.5, fontWeight: 800, color, marginBottom: 4, textTransform: "uppercase" }}>{guidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}</div>}
                   <div style={{ fontSize: 11, color: "#132A20" }}><b>Olası neden:</b> {guidance.possibleCauses.join(", ")}</div>
                   <div style={{ fontSize: 11, color: "#132A20", marginTop: 2 }}><b>İlk aksiyon:</b> {guidance.firstActions.join(" · ")}</div>
+                  {guidance.brandNote && (
+                    <div style={{ fontSize: 11, color: "#132A20", marginTop: 4, paddingTop: 4, borderTop: `1px solid ${color}33` }}><b>{guidance.brandNote.manufacturer} notu:</b> {guidance.brandNote.text}</div>
+                  )}
                 </div>
               );
             })()}
@@ -1321,7 +1336,14 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
     // Güvenlik'te hiç çalışmazdı.
     const point = state.mahalPoints.find((p) => p.id === deepLink.pointId && p.department === department);
     if (point) {
-      if (point.perFloor) setFloorFocus({ pointId: point.id, floorLabel: deepLink.floorLabel });
+      // Ekipman-bazlı gruplarda (mtd3/mtd4 gibi) `deepLink.locationKey`
+      // biliniyorsa (belirli bir ekipmanın QR'ı okutulduysa, bkz.
+      // assetScan.js matchedLocationKey) katın konum listesine kaydırmak
+      // yerine DOĞRUDAN o ekipmanın kontrol formu açılır — kullanıcı
+      // teyidiyle: "Kazan 2 arızalıysa ona özel veri olabilmeli".
+      const loc = point.perFloor && deepLink.locationKey ? (point.locations || []).find((l) => l.key === deepLink.locationKey) : null;
+      if (loc) requestFill(point, loc, null, "qr");
+      else if (point.perFloor) setFloorFocus({ pointId: point.id, floorLabel: deepLink.floorLabel });
       else requestFill(point, null, null, "qr");
     }
     onConsumeDeepLink();

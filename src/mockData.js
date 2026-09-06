@@ -579,35 +579,109 @@ const TEKNIK_MEKANIK_GUNLUK = [
     ],
   },
   {
-    id: "mtd3", department: "Teknik", role: "Mekanik", name: "Isıtma Odası (Kazan Dairesi, Yangın Pompası, Hidroforlar)", assetId: "PP-013-01", floorLabel: "3B", side: "Sarıyer",
-    assetDesc: "3x Viessmann Paromat-Simplex kazan + Weishaupt doğalgaz brülör, alt zone yangın pompası + joker pompa, hidrofor ünitesi", period: "Günlük",
-    questions: [
-      { text: "Kazan çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 60, max: 82 },
-      { text: "Sistem/kazan dairesi su basıncı (bar)", type: "sayi", unit: "bar", min: 1.5, max: 3 },
-      { text: "Doğalgaz kaçağı/kokusu var mı?", failOn: "Evet" },
-      { text: "Yangın pompası otomatik/hazır konumda mı?", failOn: "Hayır" },
-      { text: "Hidrofor basınç şalteri normal çalışıyor mu?", failOn: "Hayır" },
+    // Kullanıcı teyidiyle: "önce kazanlar ile ilgili soru 1 2 3 nolu kazan
+    // var... bu kazanlara bağlı brülörler var... içlerinden biri arızalı
+    // olduğunda ona özel bir veri olabilmeli... ısıtma odası bakımını
+    // açtım önce kazanlar ile ilgili sorular geldi sonra brülör sonra kazan
+    // panoları sürkülasyon pompaları ve eşanjörler" — TEK ortak soru seti
+    // yerine `perFloor:true, groupByFloor:false` (Temizlik'in tek mahal
+    // kontrolündeki AYNI desen, bkz. PerFloorCard) + her ekipman için AYRI
+    // `location` (kendi `questions` VE `assetId`'siyle) kullanılıyor.
+    // Böylece "Kazan 2 arızalı" gerçekten PP-013-02'ye bağlı bir kayıt
+    // üretir, oda geneline değil. Kazan panosu sorusu her kazanın kendi
+    // grubuna, sirkülasyon pompası sorusu ilgili eşanjörün grubuna
+    // eklendi (PP-015'in kendi notu: "...pompalar... panolar dahil" — ayrı
+    // bir varlık kaydı olmadığı için uydurma bir id eklenmedi). Yangın
+    // pompası/hidrofor (bu odanın Kat Planı equipmentIds'inde YOK, ayrıca
+    // hâlâ doğrulanmadı) tek bir "Genel" grubunda, önceki haliyle kaldı.
+    id: "mtd3", department: "Teknik", role: "Mekanik", name: "Isıtma Odası (Kazan Dairesi, Yangın Pompası, Hidroforlar)",
+    assetId: "PP-013-01", assetIds: ["PP-013-01", "PP-013-02", "PP-013-03", "PP-014-01", "PP-014-02", "PP-014-03", "PP-015-01", "PP-015-02"],
+    floorLabel: "3B", side: "Sarıyer", perFloor: true, groupByFloor: false,
+    assetDesc: "3x Viessmann Paromat-Simplex kazan + 3x Weishaupt doğalgaz brülör + 2x Alfa Laval eşanjör, alt zone yangın pompası + joker pompa, hidrofor ünitesi", period: "Günlük",
+    questions: [],
+    locations: [
+      { key: "kazan1", label: "Kazan 1", assetId: "PP-013-01", questions: [
+        { text: "Kazan 1 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 60, max: 82 },
+        { text: "Kazan 1 panosu arıza/alarm ledi yanıyor mu?", failOn: "Evet" },
+      ] },
+      { key: "kazan2", label: "Kazan 2", assetId: "PP-013-02", questions: [
+        { text: "Kazan 2 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 60, max: 82 },
+        { text: "Kazan 2 panosu arıza/alarm ledi yanıyor mu?", failOn: "Evet" },
+      ] },
+      { key: "kazan3", label: "Kazan 3", assetId: "PP-013-03", questions: [
+        { text: "Kazan 3 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 60, max: 82 },
+        { text: "Kazan 3 panosu arıza/alarm ledi yanıyor mu?", failOn: "Evet" },
+      ] },
+      { key: "brulor1", label: "Brülör 1 (Kazan 1)", assetId: "PP-014-01", questions: [
+        { text: "Brülör 1 alev/ateşleme normal mi?", failOn: "Hayır" },
+        { text: "Brülör 1'de doğalgaz kaçağı/kokusu var mı?", failOn: "Evet" },
+      ] },
+      { key: "brulor2", label: "Brülör 2 (Kazan 2)", assetId: "PP-014-02", questions: [
+        { text: "Brülör 2 alev/ateşleme normal mi?", failOn: "Hayır" },
+        { text: "Brülör 2'de doğalgaz kaçağı/kokusu var mı?", failOn: "Evet" },
+      ] },
+      { key: "brulor3", label: "Brülör 3 (Kazan 3)", assetId: "PP-014-03", questions: [
+        { text: "Brülör 3 alev/ateşleme normal mi?", failOn: "Hayır" },
+        { text: "Brülör 3'te doğalgaz kaçağı/kokusu var mı?", failOn: "Evet" },
+      ] },
+      { key: "esanjor1", label: "Eşanjör 1 (+ Sirkülasyon Pompası)", assetId: "PP-015-01", questions: [
+        { text: "Eşanjör 1'de sızıntı var mı?", failOn: "Evet" },
+        { text: "Eşanjör 1 sirkülasyon pompası otomatik çalışıyor mu?", failOn: "Hayır" },
+        { text: "Genleşme tankı basıncı normal mi? (Eşanjör 1 hattı)", failOn: "Hayır" },
+      ] },
+      { key: "esanjor2", label: "Eşanjör 2 (+ Sirkülasyon Pompası)", assetId: "PP-015-02", questions: [
+        { text: "Eşanjör 2'de sızıntı var mı?", failOn: "Evet" },
+        { text: "Eşanjör 2 sirkülasyon pompası otomatik çalışıyor mu?", failOn: "Hayır" },
+        { text: "Genleşme tankı basıncı normal mi? (Eşanjör 2 hattı)", failOn: "Hayır" },
+      ] },
+      { key: "genel", label: "Genel (Sistem Basıncı, Yangın Pompası, Hidrofor)", questions: [
+        { text: "Sistem/kazan dairesi su basıncı (bar)", type: "sayi", unit: "bar", min: 1.5, max: 3 },
+        { text: "Yangın pompası otomatik/hazır konumda mı?", failOn: "Hayır" },
+        { text: "Hidrofor basınç şalteri normal çalışıyor mu?", failOn: "Hayır" },
+      ] },
     ],
   },
   {
-    // Kullanıcı teyidiyle: "chillerlerde sürkülasyon pompalarıda var...
-    // birbirine bağlı ekipmanları kontrolü atlamak için" — bu odanın Kat
-    // Planı'ndaki GERÇEK ekipman listesi (bkz. piramitData.js "Soğutma
-    // Odası"/Sarıyer teknikMahal kaydı) 3 chiller + 3 eşanjör içeriyor,
-    // tek bir chiller değil. `assetId` (birincil, geriye dönük uyumluluk)
-    // yanında MAINTENANCE_ITEMS'in zaten kullandığı AYNI `assetIds` (tam
-    // liste) deseni eklendi — Faz 1 QR taraması ve Faz 7a uygunluk
-    // taraması artık bu odadaki HERHANGİ bir ekipmanın QR'ını/durumunu bu
-    // TEK kontrol noktasına bağlayabiliyor. Sirkülasyon pompaları ayrı bir
-    // varlık kaydına sahip değil (sadece chiller/eşanjör notlarında
-    // "dahildir" olarak geçiyor) — uydurma bir id eklenmedi.
-    id: "mtd4", department: "Teknik", role: "Mekanik", name: "Soğutma Odası (Chiller)", assetId: "PP-034-01", assetIds: ["PP-034-01", "PP-034-02", "PP-038", "PP-035", "PP-036-01", "PP-036-02"], floorLabel: "3B", side: "Sarıyer",
+    // Kullanıcı teyidiyle: "bu birbirine bağlı tüm ekipmanlar için geçerli
+    // olan bir durum olmalı" — mtd3'teki (Isıtma Odası) AYNI ekipman-bazlı
+    // grup deseni Chiller odasına da uygulandı (önceki "tek soru seti,
+    // hangi chiller olduğu belirsiz" hâli, bkz. bu noktadaki önceki not).
+    id: "mtd4", department: "Teknik", role: "Mekanik", name: "Soğutma Odası (Chiller)",
+    assetId: "PP-034-01", assetIds: ["PP-034-01", "PP-034-02", "PP-038", "PP-035", "PP-036-01", "PP-036-02"],
+    floorLabel: "3B", side: "Sarıyer", perFloor: true, groupByFloor: false,
     assetDesc: "3x York chiller + 3x Alfa Laval eşanjör, sirkülasyon pompaları", period: "Günlük",
-    questions: [
-      { text: "Chiller çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 6, max: 12 },
-      { text: "Kompresör basıncı (bar)", type: "sayi", unit: "bar", min: 4, max: 12 },
-      { text: "Anormal titreşim/ses var mı?", failOn: "Evet" },
-      { text: "Genleşme tankı basıncı normal mi?", failOn: "Hayır" },
+    questions: [],
+    locations: [
+      { key: "chiller1", label: "Chiller 1", assetId: "PP-034-01", questions: [
+        { text: "Chiller 1 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 6, max: 12 },
+        { text: "Chiller 1 kompresör basıncı (bar)", type: "sayi", unit: "bar", min: 4, max: 12 },
+        { text: "Chiller 1'de anormal titreşim/ses var mı?", failOn: "Evet" },
+      ] },
+      { key: "chiller2", label: "Chiller 2", assetId: "PP-034-02", questions: [
+        { text: "Chiller 2 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 6, max: 12 },
+        { text: "Chiller 2 kompresör basıncı (bar)", type: "sayi", unit: "bar", min: 4, max: 12 },
+        { text: "Chiller 2'de anormal titreşim/ses var mı?", failOn: "Evet" },
+      ] },
+      { key: "chiller3", label: "Chiller 3", assetId: "PP-038", questions: [
+        { text: "Chiller 3 çıkış suyu sıcaklığı (°C)", type: "sayi", unit: "°C", min: 6, max: 12 },
+        { text: "Chiller 3 kompresör basıncı (bar)", type: "sayi", unit: "bar", min: 4, max: 12 },
+        { text: "Chiller 3'te anormal titreşim/ses var mı?", failOn: "Evet" },
+      ] },
+      { key: "esanjor1", label: "Eşanjör 1 (+ Sirkülasyon Pompası)", assetId: "PP-035", questions: [
+        { text: "Eşanjör 1'de sızıntı var mı?", failOn: "Evet" },
+        { text: "Eşanjör 1 sirkülasyon pompası otomatik çalışıyor mu?", failOn: "Hayır" },
+        { text: "Genleşme tankı basıncı normal mi? (Eşanjör 1 hattı)", failOn: "Hayır" },
+      ] },
+      { key: "esanjor2", label: "Eşanjör 2 (+ Sirkülasyon Pompası)", assetId: "PP-036-01", questions: [
+        { text: "Eşanjör 2'de sızıntı var mı?", failOn: "Evet" },
+        { text: "Eşanjör 2 sirkülasyon pompası otomatik çalışıyor mu?", failOn: "Hayır" },
+        { text: "Genleşme tankı basıncı normal mi? (Eşanjör 2 hattı)", failOn: "Hayır" },
+      ] },
+      { key: "esanjor3", label: "Eşanjör 3 (+ Sirkülasyon Pompası)", assetId: "PP-036-02", questions: [
+        { text: "Eşanjör 3'te sızıntı var mı?", failOn: "Evet" },
+        { text: "Eşanjör 3 sirkülasyon pompası otomatik çalışıyor mu?", failOn: "Hayır" },
+        { text: "Genleşme tankı basıncı normal mi? (Eşanjör 3 hattı)", failOn: "Hayır" },
+      ] },
     ],
   },
   {
@@ -1316,6 +1390,34 @@ export function migrateLegacyState(state) {
       const points = next.mahalPoints.map((p) => {
         const wanted = assetIdsById.get(p.id);
         if (wanted && !p.assetIds) { changed = true; return { ...p, assetIds: wanted }; }
+        return p;
+      });
+      if (changed) next = { ...next, mahalPoints: points };
+    }
+  }
+  // Kullanıcı teyidiyle: "ısıtma odası bakımını açtım... önce kazanlar
+  // ile ilgili sorular geldi sonra brülör sonra kazan panoları
+  // sirkülasyon pompaları ve eşanjörler bu birbirine bağlı tüm ekipmanlar
+  // için geçerli olan bir durum olmalı" — mtd3/mtd4 artık TEK ortak
+  // `questions` yerine ekipman-bazlı `locations` kullanıyor (bkz. bu
+  // noktaların güncel tanımı). Zaten Firestore'a persist edilmiş ESKİ
+  // kayıtlarda henüz `locations` yok — seed sabiti değiştirmek tek başına
+  // hiçbir şey kazandırmaz (Pano kontrolleri/assetIds'teki AYNI sorun/
+  // çözüm). Persisted kayıtta `locations` yoksa (idempotent) MAHAL_POINTS'
+  // teki güncel `perFloor`/`groupByFloor`/`locations`/`assetIds`/
+  // `assetDesc` ile senkronlanır — eski düz `questions` alanı (artık []
+  // olan) bilerek üzerine yazılır, çünkü yeni yapıda kullanılmıyor.
+  if (Array.isArray(next.mahalPoints)) {
+    const restructuredIds = new Set(["mtd3", "mtd4"]);
+    const freshById = new Map(MAHAL_POINTS.filter((p) => restructuredIds.has(p.id)).map((p) => [p.id, p]));
+    if (freshById.size > 0) {
+      let changed = false;
+      const points = next.mahalPoints.map((p) => {
+        const fresh = freshById.get(p.id);
+        if (fresh && !p.locations) {
+          changed = true;
+          return { ...p, perFloor: fresh.perFloor, groupByFloor: fresh.groupByFloor, locations: fresh.locations, assetIds: fresh.assetIds, assetDesc: fresh.assetDesc, questions: fresh.questions };
+        }
         return p;
       });
       if (changed) next = { ...next, mahalPoints: points };

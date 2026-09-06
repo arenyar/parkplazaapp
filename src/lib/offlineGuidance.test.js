@@ -19,6 +19,17 @@ test("eşleşmeyen bir soru için null döner — zorla uydurulmaz", () => {
   assert.equal(getOfflineGuidance({ text: "Bugün hava nasıl?" }), null);
 });
 
+test("marka bilgisi verilince (Viessmann/Weishaupt/York/Alfa Laval) marka notu eklenir", () => {
+  const q = { text: "Kazan 1 panosu arıza/alarm ledi yanıyor mu?", failOn: "Evet" };
+  const withBrand = getOfflineGuidance(q, { manufacturer: "Weishaupt" });
+  assert.ok(withBrand.brandNote);
+  assert.equal(withBrand.brandNote.manufacturer, "Weishaupt");
+  const withoutBrand = getOfflineGuidance(q);
+  assert.equal(withoutBrand.brandNote, null);
+  const unknownBrand = getOfflineGuidance(q, { manufacturer: "Bilinmeyen Marka A.Ş." });
+  assert.equal(unknownBrand.brandNote, null, "tanımsız marka için uydurma bir not üretilmez");
+});
+
 test("gerçek soru metinlerinin çoğunluğu (mockData.js'ten) bir desenle eşleşir", () => {
   // Kullanıcı teyidiyle örnek verdiği gerçek sorular — kapsam kontrolü.
   const real = [

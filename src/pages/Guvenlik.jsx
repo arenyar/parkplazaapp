@@ -158,6 +158,8 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
   const [assetScan, setAssetScan] = useState(null);
   const [aiChecklistTarget, setAiChecklistTarget] = useState(null);
   const [focusPointId, setFocusPointId] = useState(null);
+  const [focusLocationKey, setFocusLocationKey] = useState(null);
+  const [focusFloorLabel, setFocusFloorLabel] = useState(null);
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Güvenlik") return;
     // Kullanıcı teyidiyle: "önce kat seçsin sonra departman seçsin..." — bkz.
@@ -169,7 +171,23 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "assetScan") {
       setTab("mahal");
-      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel, matchedLocationKey: deepLink.matchedLocationKey });
+      onConsumeDeepLink();
+      return;
+    }
+    // Kullanıcı teyidiyle: "unutma iki qr kod var bir mahallerin 2
+    // ekipmanların... mahal okuttuğu zaman seçenek sun hangi ekipmanın
+    // kontrolü yapmak istersin diye" — bkz. Teknik.jsx'teki AYNI not.
+    // Önceden mobilde (MahalGridScreen) bu deepLink hiç tüketilmiyordu
+    // (aşağıdaki "mahal sekmesine gidiyorsa MahalKontrol tüketir" varsayımı
+    // mobilde YANLIŞTI, çünkü mobil MahalKontrol'ü değil MahalGridScreen'i
+    // kullanıyor) — düz bir mahal QR'ı okutulunca mobilde hiçbir şey
+    // olmuyordu, sadece sekme değişiyordu.
+    if (mobileMode && deepLink.pointId && !deepLink.action) {
+      setTab("mahal");
+      setFocusPointId(deepLink.pointId);
+      setFocusLocationKey(deepLink.locationKey || null);
+      setFocusFloorLabel(deepLink.floorLabel || null);
       onConsumeDeepLink();
       return;
     }
@@ -450,8 +468,8 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
           sadece masaüstünde tam çalışıyor. */}
       {tab === "mahal" && (
         mobileMode
-          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} focusPointId={focusPointId} onConsumeFocus={() => setFocusPointId(null)} />
-          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" canWrite={canWrite} focusPointId={focusPointId} focusLocationKey={focusLocationKey} focusFloorLabel={focusFloorLabel} onConsumeFocus={() => { setFocusPointId(null); setFocusLocationKey(null); setFocusFloorLabel(null); }} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Güvenlik" title="Güvenlik Devriye" deepLink={focusPointId ? { pointId: focusPointId, locationKey: focusLocationKey } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); setFocusLocationKey(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
       )}
 
       {tab === "gorevler" && (
@@ -483,12 +501,14 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
             setAiChecklistTarget({ point, location: null });
           } else {
             setFocusPointId(assetScan.matchedPointId);
+            setFocusLocationKey(assetScan.matchedLocationKey || null);
           }
           setAssetScan(null);
         }}
         onStartFault={() => {
           const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
-          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          const loc = point && assetScan.matchedLocationKey ? (point.locations || []).find((l) => l.key === assetScan.matchedLocationKey) : null;
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: loc ? `${point.name} (${loc.label})` : point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
           setAssetScan(null);
         }} />
       {aiChecklistTarget && (

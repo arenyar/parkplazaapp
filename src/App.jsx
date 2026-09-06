@@ -223,7 +223,15 @@ export default function App() {
       const mahalId = url.searchParams.get("mahal");
       const assetId = url.searchParams.get("asset");
       if (mahalId) {
-        setPendingQr({ mahalId, floorLabel: url.searchParams.get("floor") || null });
+        // `loc` — bkz. MahalKontrol.jsx buildQrTargets: groupByFloor:false
+        // (ekipman-bazlı gruplar, ör. mtd3/mtd4) noktalarında Toplu QR
+        // basımı her ekipman için AYRI bir mahal QR'ı üretir
+        // (`?mahal=<pointId>&loc=<locationKey>`) — floor QR'ından farklı
+        // olarak burada hangi EKİPMAN istendiği zaten QR'ın içinde belli,
+        // bu yüzden aşağıda locationKey olarak taşınır ve doğrudan o
+        // ekipmanın formu açılır (kullanıcı teyidiyle: "ekipman qr
+        // okutulduğuda ona bağlı kontrol cheklisti aç").
+        setPendingQr({ mahalId, floorLabel: url.searchParams.get("floor") || null, locationKey: url.searchParams.get("loc") || null });
         window.history.replaceState({}, "", url.pathname);
       } else if (assetId) {
         setPendingAssetId(assetId);
@@ -244,7 +252,7 @@ export default function App() {
       setPendingQr(null);
       return;
     }
-    setMahalDeepLink({ pointId: pendingQr.mahalId, department: point.department, floorLabel: pendingQr.floorLabel });
+    setMahalDeepLink({ pointId: pendingQr.mahalId, department: point.department, floorLabel: pendingQr.floorLabel, locationKey: pendingQr.locationKey });
     if (DEPARTMENT_VIEW[point.department]) setView(DEPARTMENT_VIEW[point.department]);
     setQrLinkPending(true);
     setPendingQr(null);
@@ -257,7 +265,7 @@ export default function App() {
       setPendingAssetId(null);
       return;
     }
-    setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+    setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel, matchedLocationKey: resolved.matchedLocationKey });
     setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
     setQrLinkPending(true);
     setPendingAssetId(null);
@@ -307,7 +315,7 @@ export default function App() {
       if (mahalId) {
         const point = state.mahalPoints.find((p) => p.id === mahalId);
         if (point) {
-          setMahalDeepLink({ pointId: mahalId, department: point.department, floorLabel: url.searchParams.get("floor") || null });
+          setMahalDeepLink({ pointId: mahalId, department: point.department, floorLabel: url.searchParams.get("floor") || null, locationKey: url.searchParams.get("loc") || null });
           if (DEPARTMENT_VIEW[point.department]) setView(DEPARTMENT_VIEW[point.department]);
           return;
         }
@@ -320,7 +328,7 @@ export default function App() {
       if (assetIdParam) {
         const resolved = resolveAssetScan(state, assetIdParam);
         if (resolved) {
-          setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+          setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel, matchedLocationKey: resolved.matchedLocationKey });
           setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
           return;
         }
@@ -334,7 +342,7 @@ export default function App() {
     const asset = state.assets.find((a) => text.toLowerCase().includes(a.name.toLowerCase()) || a.id === text);
     if (asset) {
       const resolved = resolveAssetScan(state, asset.id);
-      setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel });
+      setMahalDeepLink({ action: "assetScan", department: resolved.department, assetId: resolved.assetId, assetName: resolved.assetName, matchedPointId: resolved.matchedPointId, matchedPointFloorLabel: resolved.matchedPointFloorLabel, matchedLocationKey: resolved.matchedLocationKey });
       setView(DEPARTMENT_VIEW[resolved.department] || "varliklar");
     } else showToast(`QR okundu: "${text}" — eşleşen bir varlık bulunamadı.`, "error");
   }

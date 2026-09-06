@@ -3,6 +3,7 @@ import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkle
 import { getLocations, runFor, hasNonConformity, resolveMeters, buildMahalFillPatch, startMahalRun, NonConformityPanel, FillModal } from "../../pages/MahalKontrol.jsx";
 import { validateReading, latestReading } from "../../lib/meterValidation.js";
 import { MAHAL_PERIODS } from "../../mockData.js";
+import { floorPhrase } from "../../piramitData.js";
 import { TaskForm, emptyTask } from "../../components/TaskForm.jsx";
 import { SectionHeader } from "./SectionHeader.jsx";
 import { mobileTokens as t } from "../tokens.js";
@@ -86,7 +87,13 @@ function buildCells(points, state) {
       return;
     }
     locs.forEach((loc) => {
-      cells.push({ key: `${point.id}_${loc.key}`, label: loc.label, point, loc, floor: loc.floorLabel || "Diğer" });
+      // mtd3/mtd4 gibi ekipman-bazlı gruplarda (bkz. mockData.js locations)
+      // her location kendi floorLabel'ını TAŞIMAZ — hepsi zaten TEK odanın
+      // (dolayısıyla TEK katın) içinde. `loc.floorLabel` sadece guv_tur/
+      // fireEquipment gibi ÇOK katlı türetilmiş konumlarda var. Bu yüzden
+      // yoksa point.floorLabel'a düşülür — aksi halde bu ekipmanlar yanlışlıkla
+      // "Diğer" kovasına düşüyordu (kendi katının akordiyonunda hiç görünmüyordu).
+      cells.push({ key: `${point.id}_${loc.key}`, label: loc.label, point, loc, floor: loc.floorLabel || point.floorLabel || "Diğer" });
     });
   });
   return cells.map((c) => {
@@ -268,7 +275,7 @@ function CompensationReadingSheet({ target, onSave, onClose }) {
   );
 }
 
-export function MahalGridScreen({ state, updateState, currentUserName, department, canWrite = true, focusPointId, onConsumeFocus }) {
+export function MahalGridScreen({ state, updateState, currentUserName, department, canWrite = true, focusPointId, focusLocationKey, focusFloorLabel, onConsumeFocus }) {
   const [fillTarget, setFillTarget] = useState(null);
   const [issueForm, setIssueForm] = useState(null);
   // Kullanıcı teyidiyle: "arıza kaydı açıldığında o kattaki mahalleri
@@ -295,13 +302,51 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
   // "Bakım Kontrolü Yap" seçilince (bkz. pages/Teknik.jsx/Guvenlik.jsx
   // AssetScanSheet) buraya bağlı noktanın id'si `focusPointId` olarak düşer
   // — masaüstü MahalKontrol.jsx'in `deepLink.pointId` ile ZATEN yaptığının
-  // mobil (bu ekran) karşılığı. perFloor bir nokta için burada güvenli bir
-  // varsayılan yok (hangi lokasyon belirsiz) — o durumda sadece kat
-  // akordiyonunu açık bırakıp kullanıcı elle seçsin diye sessizce geçilir.
+  // mobil (bu ekran) karşılığı. perFloor bir nokta için artık `focusLocationKey`
+  // varsa (ör. Kazan 2'nin kendi QR'ı okutulduysa, bkz. assetScan.js
+  // resolveAssetScan'in matchedLocationKey'i) DOĞRUDAN o ekipmanın FillModal'ı
+  // açılır — kullanıcı teyidiyle: "Kazan 2 arızalıysa ona özel veri
+  // olabilmeli".
+  // Kullanıcı teyidiyle: "unutma iki qr kod var bir mahallerin 2
+  // ekipmanların... mahal okuttuğu zaman seçenek sun hangi ekipmanın
+  // kontrolü yapmak istersin diye daha sonrasında soru cevap git" — bu,
+  // yukarıdaki asset QR'ından FARKLI bir giriş: mahal (oda) QR'ı okutulduğunda
+  // `focusLocationKey` BİLEREK boş gelir (hangi ekipman istendiği belli
+  // değil). Odanın birden fazla ekipman grubu (locations) varsa mevcut
+  // "hangi mahal?" seçim sheet'i (roomPicker, aşağıda zaten var) burada da
+  // kullanılır; TEK grup varsa seçime gerek yok, direkt açılır.
   useEffect(() => {
     if (!focusPointId) return;
     const point = points.find((p) => p.id === focusPointId);
-    if (point && !point.perFloor) startAndOpenFill(point, null, "qr");
+    if (point) {
+      if (!point.perFloor) {
+        startAndOpenFill(point, null, "qr");
+      } else if (focusLocationKey) {
+        const loc = (point.locations || []).find((l) => l.key === focusLocationKey);
+        if (loc) startAndOpenFill(point, loc, "qr");
+      } else {
+        // guv_tur gibi katı-bazlı (deriveLocations/floorLabel'lı) noktalarda
+        // fiziksel QR etiketi belirli bir kata özel (`?mahal=...&floor=3B`)
+        // — kullanıcı teyidiyle: "Güvenliğin Tur sistemi kat bazlı olmalı
+        // her katta 1qr olacak". `focusFloorLabel` verilmişse (bkz. App.jsx
+        // mahalDeepLink.floorLabel) konum listesi o kata daraltılır; floor
+        // bilgisi taşımayan konumlarda (ör. mtd3/mtd4 ekipman grupları,
+        // hiçbirinde floorLabel alanı yok) bu filtre bir etki yaratmaz.
+        const allLocs = getLocations(point, state);
+        const locs = focusFloorLabel ? allLocs.filter((l) => l.floorLabel == null || l.floorLabel === focusFloorLabel) : allLocs;
+        if (locs.length === 1) {
+          startAndOpenFill(point, locs[0], "qr");
+        } else if (locs.length > 1) {
+          const items = locs.map((loc) => {
+            const nonconforming = hasNonConformity(point, state, loc.key);
+            const run = runFor(point, state.mahalRuns, loc.key, null);
+            const status = nonconforming ? "nonconforming" : run?.status === "Tamamlandı" ? "done" : "pending";
+            return { key: `${point.id}_${loc.key}`, label: loc.label, point, loc, status };
+          });
+          setRoomPicker({ group: { floor: focusFloorLabel ? floorPhrase(focusFloorLabel) : point.name }, mode: "kontrol", items, title: locs[0]?.floorLabel ? "hangi konum?" : "hangi ekipman?" });
+        }
+      }
+    }
     onConsumeFocus?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusPointId]);
@@ -490,7 +535,7 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
           <div style={{ position: "absolute", inset: 0, background: "rgba(20,49,40,0.45)" }} onClick={() => setRoomPicker(null)} />
           <div style={{ position: "relative", width: "100%", maxWidth: 480, margin: "0 auto", maxHeight: "70vh", overflowY: "auto", background: t.surface, borderRadius: "16px 16px 0 0", paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: `1px solid ${t.hairline}` }}>
-              <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.ink }}>{roomPicker.group.floor}{roomPicker.periodLabel ? ` · ${roomPicker.periodLabel}` : ""} — hangi mahal?</p>
+              <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.ink }}>{roomPicker.group.floor}{roomPicker.periodLabel ? ` · ${roomPicker.periodLabel}` : ""} — {roomPicker.title || "hangi mahal?"}</p>
               <button onClick={() => setRoomPicker(null)} aria-label="Kapat" style={{ all: "unset", cursor: "pointer", color: t.muted, display: "flex", width: 32, height: 32, alignItems: "center", justifyContent: "center" }}><X size={20} aria-hidden="true" /></button>
             </div>
             {roomPicker.mode === "ariza" && (

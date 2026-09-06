@@ -32,6 +32,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
   const [assetScan, setAssetScan] = useState(null);
   const [aiChecklistTarget, setAiChecklistTarget] = useState(null);
   const [focusPointId, setFocusPointId] = useState(null);
+  const [focusLocationKey, setFocusLocationKey] = useState(null);
   // Ana Sayfa'daki departman kısayollarından (bkz. Dashboard.jsx) gelirse
   // deepLink.tab hangi sekmeye gidileceğini belirtir. "quickRequest"/
   // "startTask" — bkz. mobile/create/QuickWorkFlow.jsx'teki not — BURADA
@@ -42,7 +43,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "assetScan") {
       setTab("mahal");
-      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel, matchedLocationKey: deepLink.matchedLocationKey });
       onConsumeDeepLink();
       return;
     }
@@ -83,7 +84,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
+      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={focusPointId ? { pointId: focusPointId, locationKey: focusLocationKey } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); setFocusLocationKey(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
 
       {tab === "gorevler" && (
         mobileMode ? (
@@ -109,12 +110,14 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
             setAiChecklistTarget({ point, location: null });
           } else {
             setFocusPointId(assetScan.matchedPointId);
+            setFocusLocationKey(assetScan.matchedLocationKey || null);
           }
           setAssetScan(null);
         }}
         onStartFault={() => {
           const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
-          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          const loc = point && assetScan.matchedLocationKey ? (point.locations || []).find((l) => l.key === assetScan.matchedLocationKey) : null;
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: loc ? `${point.name} (${loc.label})` : point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
           setAssetScan(null);
         }} />
       {aiChecklistTarget && (

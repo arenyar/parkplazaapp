@@ -438,7 +438,11 @@ export const PIRAMIT_FLOORS_SEED = [
     teknikMahaller: [
       { label: "Trafo / OG Pano Odası", side: "Beşiktaş", equipmentIds: ["PP-001-01", "PP-001-02", nextCo2Tup()] },
       { label: "Isıtma Odası", side: "Sarıyer", rooms: [
-        { label: "Kazan Dairesi", equipmentIds: ["PP-013-01", "PP-013-02", "PP-013-03", "PP-014-01", "PP-014-02", "PP-014-03", nextCo2Tup()] },
+        // PP-015-01/02 (eşanjörler) kullanıcı teyidiyle eklendi: "ısıtma
+        // odası bakımını açtım... sonra brülör sonra kazan panoları
+        // sirkülasyon pompaları ve eşanjörler" — bu ekipmanlar önceden bu
+        // odanın equipmentIds listesinde YOKTU (gerçek bir veri eksikliği).
+        { label: "Kazan Dairesi", equipmentIds: ["PP-013-01", "PP-013-02", "PP-013-03", "PP-014-01", "PP-014-02", "PP-014-03", "PP-015-01", "PP-015-02", nextCo2Tup()] },
         { label: "Hidrofor ve Yangın Pompası", equipmentIds: ["PP-018", "PP-019", "PP-089", "PP-090-01", "PP-090-02", "PP-090-03", nextTeknikMahalTup()] },
       ] },
       { label: "Soğutma Odası", side: "Sarıyer", equipmentIds: ["PP-034-01", "PP-034-02", "PP-038", "PP-035", "PP-036-01", "PP-036-02", nextTeknikMahalTup()] },

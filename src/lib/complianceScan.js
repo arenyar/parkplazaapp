@@ -52,10 +52,19 @@ export function runComplianceScan(state) {
   // bağlayabiliyor — hepsi "kontrol edilmiş/şablonu var" sayılmalı, sadece
   // birincil `assetId` değil (aksi halde chiller odasındaki 2. ve 3.
   // chiller/eşanjörler hâlâ yanlış pozitif "şablonsuz" görünürdü).
-  const pointByAsset = new Map();
+  // `point.locations[].assetId` — kullanıcı teyidiyle: "içlerinden biri
+  // arızalı olduğunda ona özel bir veri olabilmeli" (bkz. mockData.js mtd3/
+  // mtd4 ekipman-bazlı gruplar). Bir varlık BELİRLİ bir location'a
+  // bağlıysa (`location` dolu döner) G1 SADECE o location'ın kendi
+  // "Tamamlandı" run'ına bakar — Kazan 1'in kontrolü yapılması Kazan 2'yi
+  // "kontrol edilmiş" göstermesin diye.
+  const pointByAsset = new Map(); // assetId -> { point, location: loc|null }
   mahalPoints.forEach((p) => {
+    (p.locations || []).forEach((loc) => {
+      if (loc.assetId && !pointByAsset.has(loc.assetId)) pointByAsset.set(loc.assetId, { point: p, location: loc });
+    });
     const ids = p.assetIds && p.assetIds.length > 0 ? p.assetIds : (p.assetId ? [p.assetId] : []);
-    ids.forEach((id) => { if (!pointByAsset.has(id)) pointByAsset.set(id, p); });
+    ids.forEach((id) => { if (!pointByAsset.has(id)) pointByAsset.set(id, { point: p, location: null }); });
   });
   const maintByAsset = new Set();
   maintenance.forEach((m) => (m.assetIds || []).forEach((id) => maintByAsset.add(id)));
@@ -74,9 +83,10 @@ export function runComplianceScan(state) {
 
   // G1 — bağlı bir Mahal Kontrol noktası var ama hiç "Tamamlandı" run yok.
   assets.forEach((a) => {
-    const point = pointByAsset.get(a.id);
-    if (!point) return;
-    const hasRun = mahalRuns.some((r) => r.pointId === point.id && r.status === "Tamamlandı");
+    const match = pointByAsset.get(a.id);
+    if (!match) return;
+    const { point, location } = match;
+    const hasRun = mahalRuns.some((r) => r.pointId === point.id && r.status === "Tamamlandı" && (location ? r.locationKey === location.key : true));
     if (!hasRun) push("G1", a, {});
   });
 

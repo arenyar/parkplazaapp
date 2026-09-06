@@ -61,6 +61,8 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
   const [assetScan, setAssetScan] = useState(null);
   const [aiChecklistTarget, setAiChecklistTarget] = useState(null);
   const [focusPointId, setFocusPointId] = useState(null);
+  const [focusLocationKey, setFocusLocationKey] = useState(null);
+  const [focusFloorLabel, setFocusFloorLabel] = useState(null);
   useEffect(() => {
     if (!deepLink || deepLink.department !== "Teknik") return;
     // Kullanıcı teyidiyle: "önce kat seçsin sonra departman seçsin..." — bkz.
@@ -71,7 +73,26 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
     if (deepLink.action === "startTask") { quick.start({ mode: "gorev" }); onConsumeDeepLink(); return; }
     if (deepLink.action === "assetScan") {
       setTab("mahal");
-      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel });
+      setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel, matchedLocationKey: deepLink.matchedLocationKey });
+      onConsumeDeepLink();
+      return;
+    }
+    // Kullanıcı teyidiyle: "unutma iki qr kod var bir mahallerin 2
+    // ekipmanların... mahal okuttuğu zaman seçenek sun hangi ekipmanın
+    // kontrolü yapmak istersin diye" — bu, ASSET QR'ından (yukarıdaki
+    // action==="assetScan") FARKLI: burada mahal QR'ı (bkz. App.jsx
+    // handleQrDecoded `?mahal=`) okutulmuş, `pointId` var ama `action`
+    // yok. Mobilde bu noktanın kendi tab'ına (MahalGridScreen) aynı
+    // focusPointId mekanizmasıyla yönlendirilir — locationKey BİLEREK boş
+    // bırakılır (hangi ekipman istendiği belli değil), MahalGridScreen o
+    // noktanın birden fazla ekipmanı varsa seçim sunar. Masaüstünde
+    // (MahalKontrol.jsx) bu dallanmaya gerek yok — deepLink zaten aşağıda
+    // olduğu gibi geçiyor, kendi floorFocus/requestFill mantığını kullanıyor.
+    if (mobileMode && deepLink.pointId && !deepLink.action) {
+      setTab("mahal");
+      setFocusPointId(deepLink.pointId);
+      setFocusLocationKey(deepLink.locationKey || null);
+      setFocusFloorLabel(deepLink.floorLabel || null);
       onConsumeDeepLink();
       return;
     }
@@ -167,8 +188,8 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
           eski admin/tanım ağırlıklı MahalKontrol.jsx'i kullanıyor. */}
       {tab === "mahal" && (
         mobileMode
-          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" canWrite={canWrite} focusPointId={focusPointId} onConsumeFocus={() => setFocusPointId(null)} />
-          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={focusPointId ? { pointId: focusPointId } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" canWrite={canWrite} focusPointId={focusPointId} focusLocationKey={focusLocationKey} focusFloorLabel={focusFloorLabel} onConsumeFocus={() => { setFocusPointId(null); setFocusLocationKey(null); setFocusFloorLabel(null); }} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Teknik" deepLink={focusPointId ? { pointId: focusPointId, locationKey: focusLocationKey } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); setFocusLocationKey(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
       )}
 
       {tab === "planli" && (
@@ -213,12 +234,14 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
             setAiChecklistTarget({ point, location: null });
           } else {
             setFocusPointId(assetScan.matchedPointId);
+            setFocusLocationKey(assetScan.matchedLocationKey || null);
           }
           setAssetScan(null);
         }}
         onStartFault={() => {
           const point = state.mahalPoints.find((p) => p.id === assetScan.matchedPointId);
-          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
+          const loc = point && assetScan.matchedLocationKey ? (point.locations || []).find((l) => l.key === assetScan.matchedLocationKey) : null;
+          quick.start({ mode: "ariza", assetId: assetScan.assetId, assetName: assetScan.assetName, source: point ? { point: { name: loc ? `${point.name} (${loc.label})` : point.name }, location: point.floorLabel ? { label: floorPhrase(point.floorLabel) } : null } : null });
           setAssetScan(null);
         }} />
       {aiChecklistTarget && (
