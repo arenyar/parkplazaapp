@@ -106,6 +106,13 @@ export const ALL_PERMISSION_SCREENS = ALL_SCREENS;
 // admin sonra Yetkileri Düzenle'den daraltabilir.
 export function buildPermissions(screens, allWrite = true) {
   const perms = {};
+  // Verilen listede OLMAYAN ekranlar için de AÇIKÇA {false,false,false}
+  // yazılır (undefined bırakılmaz) — yoksa migrateLegacyState'teki geriye
+  // dönük "eksik anahtarı olan hesaba tam erişim ver" migrasyonları (ör.
+  // stok) bu YENİ hesaba da yanlışlıkla tam erişim enjekte eder, admin'in
+  // Yetkileri Düzenle'de bilinçli olarak dışarıda bıraktığı ekranı geri
+  // açmış olur. Bkz. ALL_PERMISSION_SCREENS ve stok migrasyonu notu.
+  ALL_PERMISSION_SCREENS.forEach((s) => { perms[s] = { view: false, read: false, write: false }; });
   screens.forEach((s) => { perms[s] = { view: true, read: true, write: allWrite }; });
   return perms;
 }

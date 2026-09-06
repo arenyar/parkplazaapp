@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, ChevronRight, Camera } from "lucide-react";
+import { Plus, ChevronRight, Camera, Send } from "lucide-react";
 import { T, PRIORITY_STYLES } from "../theme.js";
 import { PageHeader, Card, Button, Field, Input, Select, TextArea, Pagination } from "../components/ui.jsx";
 import { usePagination } from "../lib/usePagination.js";
@@ -62,10 +62,75 @@ function emptyRequest(department, currentUser) {
 // tutulur (kullanıcı teyidiyle: "talep şikayetler ile mahal kontrollerini
 // karıştırma") — mahalPointId hiç set edilmez. Firma ve Kat/Lokasyon
 // alanları Kat Planı'ndaki gerçek kayıtlardan seçilir (uydurma değil).
+// Kullanıcı teyidiyle: "bu kullanıcı özellikle sahadan gelen talepleri
+// girdiği için ofis sakinlerine anket de yollayabilmeli" — daha önce
+// e-posta anketi SADECE bir talep "Tamamlandı" olduğunda OTOMATİK
+// gidiyordu (bkz. notifyByEmail "completed"); bu, sahadan giren personelin
+// KENDİ İSTEĞİYLE, herhangi bir talebe bağlı olmadan, seçtiği bir ofise
+// anket göndermesini sağlar. AYNI Gmail SMTP altyapısı (lib/email.js) —
+// gerçek tıklanabilir yıldız arayüzü hâlâ ayrı bir güvenli backend
+// gerektirdiği için yapılmadı (bkz. notifyByEmail'deki not); MVP burada
+// da e-posta yanıtı olarak puan/not istemeye dayanıyor.
+function SurveySendModal({ state, companyOptions, onClose, onSend }) {
+  const [company, setCompany] = useState("");
+  const [customEmail, setCustomEmail] = useState("");
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const companyRec = state.companies.find((c) => c.name === company);
+  const toEmail = customEmail.trim() || companyRec?.email || "";
+
+  async function handleSend() {
+    if (!toEmail) return;
+    setSending(true);
+    setResult(null);
+    try {
+      await onSend(toEmail, company, note);
+      setResult({ ok: true });
+    } catch (err) {
+      setResult({ ok: false, message: err.message || "E-posta gönderilemedi." });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 205, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440 }}>
+        <Card>
+          <div style={{ fontSize: 15, fontWeight: 700, color: T.ink, marginBottom: 2 }}>Ofise Anket Gönder</div>
+          <p style={{ fontSize: 11.5, color: T.dim, margin: "2px 0 14px" }}>Hizmet memnuniyeti anketi — ofis yetkilisinden bu e-postaya 1-5 arası bir puan ve varsa kısa bir notla yanıt vermesi istenir.</p>
+          <Field label="Firma / Ofis">
+            <Select value={company} onChange={(e) => { setCompany(e.target.value); setResult(null); }}>
+              <option value="">— Seçin —</option>
+              {companyOptions.map((name) => <option key={name}>{name}</option>)}
+            </Select>
+          </Field>
+          {company && !companyRec?.email && (
+            <Field label="E-posta (Kat Planı'nda kayıtlı adres yok, elle girin)">
+              <Input type="email" value={customEmail} onChange={(e) => setCustomEmail(e.target.value)} placeholder="ornek@firma.com" />
+            </Field>
+          )}
+          {company && companyRec?.email && <p style={{ fontSize: 11.5, color: T.dim, margin: "-4px 0 10px" }}>Gönderilecek adres: {companyRec.email}</p>}
+          <Field label="Not (opsiyonel)"><TextArea style={{ width: "100%", minHeight: 50 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ankete eklenecek kısa bir not…" /></Field>
+          {result?.ok && <p style={{ fontSize: 12, color: "#3FB37F", fontWeight: 600, margin: "0 0 10px" }}>Gönderildi ✓</p>}
+          {result && !result.ok && <p style={{ fontSize: 12, color: "#DC5A34", fontWeight: 600, margin: "0 0 10px" }}>{result.message}</p>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button icon={Send} onClick={handleSend} disabled={!toEmail || sending}>{sending ? "Gönderiliyor…" : "Anketi Gönder"}</Button>
+            <Button variant="quiet" onClick={onClose}>Kapat</Button>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyRequest(state.departments[0], currentUser));
   const [closureOpen, setClosureOpen] = useState(false);
+  const [surveyOpen, setSurveyOpen] = useState(false);
 
   // viaMahal — kullanıcı teyidiyle: "teknik temizlik ve güvenlik mahal
   // kontrol noktalarında uygunsuzluk gördüğünde talep şikayet açabilmeli...
@@ -218,10 +283,30 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   // kalır, sadece aktif listeden (yukarıdaki `requests` filtresi) düşer.
   function remove(id) { updateState({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, archived: true, archivedAt: new Date().toISOString(), archivedBy: currentUser } : t)) }); }
 
+  // bkz. SurveySendModal notu — herhangi bir talebe bağlı olmadan, elle
+  // tetiklenen anket gönderimi. `await` edilir (otomatik bildirimlerin
+  // aksine) çünkü modal sonucu (başarı/hata) doğrudan kullanıcıya gösterir.
+  async function sendSurvey(toEmail, companyName, note) {
+    await sendEmail({
+      to: toEmail,
+      subject: `Hizmet Memnuniyeti Anketi${companyName ? ` — ${companyName}` : ""}`,
+      text: `Sayın Yetkili,\n\nPark Plaza Maslak hizmetlerimizi değerlendirmenizi rica ederiz. Bu e-postaya 1-5 arası bir puan ve varsa kısa bir notla yanıt vermeniz yeterlidir.${note ? `\n\nNot: ${note}` : ""}\n\nSaygılarımızla,\nPark Plaza Maslak Yönetimi`,
+    });
+  }
+
   return (
     <div>
       <PageHeader title="Talep / Şikayet" subtitle={`${requests.length} kayıt — firmalardan gelen talepler ilgili departmanın görev ekranına düşer`}
-        right={canWrite && <Button icon={Plus} onClick={startNew}>Yeni Talep / Şikayet</Button>} />
+        right={canWrite && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="ghost" icon={Send} onClick={() => setSurveyOpen(true)}>Anket Gönder</Button>
+            <Button icon={Plus} onClick={startNew}>Yeni Talep / Şikayet</Button>
+          </div>
+        )} />
+
+      {surveyOpen && (
+        <SurveySendModal state={state} companyOptions={companyOptions} onClose={() => setSurveyOpen(false)} onSend={sendSurvey} />
+      )}
 
       {formOpen && canWrite && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }} onClick={() => setFormOpen(false)}>
