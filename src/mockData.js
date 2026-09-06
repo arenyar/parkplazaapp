@@ -42,6 +42,19 @@ export const TASK_TYPES = [
   { id: "mobilya-donanim", parentId: null, order: 6, label: "Mobilya / Donanım", isLeaf: true },
   { id: "boya-tadilat", parentId: null, order: 7, label: "Boya / Tadilat", isLeaf: true },
   { id: "peyzaj", parentId: null, order: 8, label: "Peyzaj", isLeaf: true },
+  // Kullanıcı teyidiyle: "tür kısım seçenekleri ekrana gelsin elektrik
+  // mekanik teknik inşaat temizlik gibi" — İnşaat (Boya/Tadilat'tan ayrı,
+  // yapısal/inşai işler) ve Temizlik (bir Teknik arızası aslında bir
+  // temizlik meselesiyse) eksikti, eklendi.
+  { id: "insaat", parentId: null, order: 9, label: "İnşaat", isLeaf: false },
+  { id: "insaat-siva-boya", parentId: "insaat", order: 1, label: "Sıva / Duvar hasarı", isLeaf: true },
+  { id: "insaat-tavan", parentId: "insaat", order: 2, label: "Tavan hasarı", isLeaf: true },
+  { id: "insaat-zemin", parentId: "insaat", order: 3, label: "Zemin / Fayans hasarı", isLeaf: true },
+  { id: "insaat-cati-cephe", parentId: "insaat", order: 4, label: "Çatı / Cephe hasarı", isLeaf: true },
+  { id: "temizlik-tur", parentId: null, order: 10, label: "Temizlik", isLeaf: false },
+  { id: "temizlik-genel", parentId: "temizlik-tur", order: 1, label: "Genel temizlik", isLeaf: true },
+  { id: "temizlik-atik", parentId: "temizlik-tur", order: 2, label: "Atık / Çöp", isLeaf: true },
+  { id: "temizlik-leke-koku", parentId: "temizlik-tur", order: 3, label: "Leke / Koku", isLeaf: true },
 ];
 
 // Bakım Takvimi'ndeki (MAINTENANCE_ITEMS) "firma" alanlarında geçen bakım
@@ -1285,6 +1298,18 @@ export function migrateLegacyState(state) {
   // dokümanlarına taksonomiyi geriye dönük ekler; sonraki her açılışta
   // dokunmaz (ör. ileride Ayarlar'dan düzenlenirse üzerine yazmaz).
   if (!Array.isArray(next.taskTypes)) next = { ...next, taskTypes: TASK_TYPES };
+  // Kullanıcı teyidiyle: "tür kısım seçenekleri ekrana gelsin elektrik
+  // mekanik teknik inşaat temizlik gibi" — İnşaat/Temizlik kökleri
+  // TASK_TYPES'a SONRADAN eklendi; yukarıdaki satır sadece dizi TAMAMEN
+  // yoksa dolduruyor, var olan (zaten seed'lenmiş) bir Firestore
+  // dokümanındaki taskTypes dizisine bu YENİ kökleri eklemiyordu — bu
+  // yüzden eksik id'ler tek tek (var olanlara dokunmadan, admin'in
+  // Ayarlar'dan yaptığı düzenlemeleri bozmadan) tamamlanıyor.
+  if (Array.isArray(next.taskTypes)) {
+    const existingIds = new Set(next.taskTypes.map((tt) => tt.id));
+    const missing = TASK_TYPES.filter((tt) => !existingIds.has(tt.id));
+    if (missing.length > 0) next = { ...next, taskTypes: [...next.taskTypes, ...missing] };
+  }
   // Faz 9 — mevcut Firestore dokümanlarına geriye dönük ekler.
   if (!Array.isArray(next.suggestions)) next = { ...next, suggestions: [] };
   // Faz 12 — mahal kontrol "tur" (bir oturumda birden çok mahal gezme)

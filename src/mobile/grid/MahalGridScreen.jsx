@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkles, ShieldCheck, AlertTriangle, MapPin, Check, ChevronRight, CircleSlash } from "lucide-react";
 import { getLocations, runFor, hasNonConformity, resolveMeters, buildMahalFillPatch, startMahalRun, NonConformityPanel, FillModal } from "../../pages/MahalKontrol.jsx";
 import { AiChecklistChat } from "../checklist/AiChecklistChat.jsx";
+import { ArizaQuickForm } from "../create/ArizaQuickForm.jsx";
+import { uploadPhoto } from "../../lib/storage.js";
 import { validateReading, latestReading } from "../../lib/meterValidation.js";
 import { MAHAL_PERIODS } from "../../mockData.js";
 import { floorPhrase } from "../../piramitData.js";
-import { TaskForm, emptyTask } from "../../components/TaskForm.jsx";
+import { emptyTask } from "../../components/TaskForm.jsx";
 import { SectionHeader } from "./SectionHeader.jsx";
 import { mobileTokens as t } from "../tokens.js";
 
@@ -488,10 +490,28 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
     updateState(patch);
     setFillTarget(null);
   }
-  function saveIssue() {
-    if (!(issueForm.description || "").trim()) return;
+  // Kullanıcı teyidiyle: "arıza kaydı aça tıkladın ekranda departman
+  // seçimi olsun... tür kısım seçenekleri ekrana gelsin... açıklama
+  // yazdır sesli de yazılsın... sonra isteğe bağlı resim eklesin" — eski
+  // genel TaskForm (departman/tür/öncelik/durum/termin/atanan gibi çok
+  // alanlı bir yönetici formu) yerine bu YOL özelinde basitleştirilmiş,
+  // adım adım bir akış (bkz. ArizaQuickForm.jsx) kullanılıyor. Departman/
+  // konum zaten `issueForm`'da (openFloorIssueAt'te dolduruldu) salt-okunur
+  // bağlam olarak var — personel değiştirmiyor. Fotoğraf, Mahal Kontrol'deki
+  // AYNI yükleme deseniyle ("Kontrolü Tamamla" tıklanınca yüklenir, bkz.
+  // MahalKontrol.jsx handlePhoto notu) sadece onaylanınca yükleniyor.
+  async function saveIssueQuick({ typeId, typePath, description, photoFile }) {
+    let photoUrl = null;
+    if (photoFile) {
+      try { photoUrl = await uploadPhoto(photoFile, "gorev-fotograflari"); }
+      catch (err) { console.error("Fotoğraf yüklenemedi:", err); }
+    }
     const id = `t_${Date.now()}`;
-    const payload = { ...issueForm, id, createdAt: new Date().toISOString(), createdBy: currentUserName, updatedAt: new Date().toISOString(), updatedBy: currentUserName };
+    const payload = {
+      ...issueForm, issueType: "Arıza", typeId, typePath, description,
+      hasPhoto: !!photoUrl, photoUrl,
+      id, createdAt: new Date().toISOString(), createdBy: currentUserName, updatedAt: new Date().toISOString(), updatedBy: currentUserName,
+    };
     updateState({ tasks: [...state.tasks, payload] });
     setIssueForm(null);
   }
@@ -561,9 +581,8 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
 
   if (issueForm) {
     return (
-      <div style={{ padding: 16, background: t.ivory, minHeight: "100%" }}>
-        <TaskForm form={issueForm} setForm={setIssueForm} departments={state.departments} types={state.taskTypes} team={state.team} onSave={saveIssue} onCancel={() => setIssueForm(null)} />
-      </div>
+      <ArizaQuickForm department={issueForm.department} location={issueForm.location} types={state.taskTypes}
+        onSave={saveIssueQuick} onCancel={() => setIssueForm(null)} />
     );
   }
 

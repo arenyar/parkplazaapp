@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Plus, X, PenLine, Printer, Send, Camera, Mic, MicOff, AlertTriangle, ChevronDown, Check } from "lucide-react";
 import { AiEditButton } from "../components/AiEditButton.jsx";
 import { useTheme } from "../lib/ThemeContext.jsx";
@@ -21,6 +21,7 @@ import { showToast } from "../lib/toast.js";
 import { PrintHeader } from "../components/PrintDocument.jsx";
 import StoredImage from "../components/StoredImage.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
+import { useSpeechDictation } from "../lib/useSpeechDictation.js";
 
 const TABS = [
   { key: "devriye", label: "Devriye & Olaylar" },
@@ -61,83 +62,6 @@ function emptyIncidentForm() {
 // düzeni) sahadaki kullanıcıyı MAHSUR bırakırdı. Gerçek istenen ekran
 // "Güvenlik Devriye" (mahal) sekmesi.
 const MOBILE_DEFAULT_TAB = "mahal";
-
-// Kullanıcı teyidiyle: "olay tutanağını yazdırırken yapay zeka destekli
-// olsun mikrofondan sesli tutanağı anlatsın" — bu depoda hiç AI/backend
-// entegrasyonu yok (yalnız Firebase), kullanıcı onayıyla kapsam sadece
-// tarayıcının yerleşik konuşma tanıma özelliğine (Web Speech API) indirildi:
-// gerçek zamanlı dikte metne çevrilip Açıklamalar kutusuna eklenir, ekstra
-// bir AI/API çağrısı ya da anahtar YOKTUR. Chrome/Edge destekler; Safari/
-// Firefox'ta API yoksa buton kullanıcıya toast ile bilgi verir.
-// Kullanıcı teyidiyle bulunan hata: "dikte et yapınca donuyor" — sebep
-// `continuous: true` idi: mobil tarayıcılarda (özellikle Android Chrome)
-// bu mod bazen `onend` HİÇ tetiklemeden mikrofonu açık/asılı bırakıyor,
-// buton "Dinliyor…" durumunda kilitli kalıyordu. Artık her cümle
-// `continuous:false` ile tek seferlik tanınıyor; kullanıcı hâlâ dikte
-// ediyorsa (activeRef true) `onend`'de kısa bir gecikmeyle KENDİLİĞİNDEN
-// yeniden başlatılıyor — kullanıcıya hâlâ kesintisiz gibi hissettiriyor
-// ama tek bir `continuous` oturumunun asılı kalma riskini taşımıyor. Ayrıca
-// 60 sn'lik mutlak bir güvenlik zaman aşımı var — ne olursa olsun buton
-// asla kalıcı kilitli kalmaz.
-function useSpeechDictation(onFinalText) {
-  const recRef = useRef(null);
-  const activeRef = useRef(false);
-  const timeoutRef = useRef(null);
-  const [listening, setListening] = useState(false);
-
-  function clearSafety() {
-    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-  }
-  function hardStop() {
-    activeRef.current = false;
-    clearSafety();
-    try { recRef.current?.stop(); } catch { /* zaten durmuş olabilir, yoksay */ }
-    setListening(false);
-  }
-  function startOnce() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { showToast("Tarayıcınız sesli dikteyi desteklemiyor — Chrome veya Edge kullanın.", "error"); activeRef.current = false; setListening(false); return; }
-    let rec;
-    try {
-      rec = new SR();
-      rec.lang = "tr-TR";
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.onresult = (e) => {
-        let text = "";
-        for (let idx = e.resultIndex; idx < e.results.length; idx++) {
-          if (e.results[idx].isFinal) text += e.results[idx][0].transcript;
-        }
-        if (text.trim()) onFinalText(text.trim());
-      };
-      rec.onerror = (e) => {
-        if (e.error === "no-speech" || e.error === "aborted") return; // sessizlik/duraklama — devam
-        activeRef.current = false;
-        setListening(false);
-      };
-      rec.onend = () => {
-        if (activeRef.current) { setTimeout(() => activeRef.current && startOnce(), 250); return; }
-        setListening(false);
-      };
-      rec.start();
-    } catch (err) {
-      console.error("Dikte başlatılamadı:", err);
-      activeRef.current = false;
-      setListening(false);
-      return;
-    }
-    recRef.current = rec;
-  }
-  function toggle() {
-    if (listening) { hardStop(); return; }
-    activeRef.current = true;
-    setListening(true);
-    startOnce();
-    clearSafety();
-    timeoutRef.current = setTimeout(hardStop, 60000);
-  }
-  return { listening, toggle };
-}
 
 export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
   const T = useTheme();
@@ -201,9 +125,19 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink]);
 
-  const dictation = useSpeechDictation((text) => {
-    setForm((f) => ({ ...f, description: f.description ? `${f.description} ${text}` : text }));
+  const dictation = useSpeechDictation({
+    onFinalText: (text) => setForm((f) => ({ ...f, description: f.description ? `${f.description} ${text}` : text })),
   });
+  // Kullanıcı teyidiyle: "sesli komut tam çalışmıyor" — hook artık HANGİ
+  // hatanın oluştuğunu (`dictation.error`) döndürüyor, burada kullanıcıya
+  // görünür bir mesaja çevriliyor (öncesinde mikrofon izni reddedilince
+  // buton sessizce kapanıyordu, hiçbir açıklama yoktu).
+  useEffect(() => {
+    if (!dictation.error) return;
+    if (dictation.error === "unsupported") showToast("Tarayıcınız sesli dikteyi desteklemiyor — Chrome veya Edge kullanın.", "error");
+    else if (dictation.error === "permission") showToast("Mikrofon izni reddedildi — tarayıcı ayarlarından bu site için mikrofona izin verin.", "error");
+    else showToast("Sesli dikte başlatılamadı, tekrar deneyin.", "error");
+  }, [dictation.error]);
   const [signing, setSigning] = useState(false);
   const [incidentPhotoFiles, setIncidentPhotoFiles] = useState([null, null]);
   const [incidentPhotoPreviews, setIncidentPhotoPreviews] = useState([null, null]);
@@ -358,6 +292,15 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
                 </div>
               }>
                 <TextArea style={{ width: "100%", minHeight: 140 }} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+                {/* Kullanıcı teyidiyle: "sesli komut tam çalışmıyor" — daha
+                    önce konuşurken ekranda HİÇBİR ŞEY görünmüyordu (sadece
+                    cümle bitince metin beliriyordu), bu "çalışmıyor" hissi
+                    yaratıyor olabilirdi. Artık anlık taslak burada görünür. */}
+                {dictation.listening && (
+                  <p style={{ fontSize: 12, color: T.dim, fontStyle: "italic", margin: "6px 0 0" }}>
+                    🎤 Dinleniyor… {dictation.interimText && `"${dictation.interimText}"`}
+                  </p>
+                )}
               </Field>
 
               <Field label={`Fotoğraflar (opsiyonel, en fazla ${MAX_INCIDENT_PHOTOS})`}>

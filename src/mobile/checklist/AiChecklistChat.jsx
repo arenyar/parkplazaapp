@@ -3,21 +3,34 @@ import { X, Sparkles, ShieldAlert, Camera } from "lucide-react";
 import { useTheme } from "../../lib/ThemeContext.jsx";
 import { Card, Button, Input } from "../../components/ui.jsx";
 import { FillModal, buildMahalFillPatch, buildOfflineMarkPatch, startMahalRun, runFor, resolveMeters } from "../../pages/MahalKontrol.jsx";
-import { requestAiChecklistTurn, computeCoverage, AI_CHECKLIST_LIMITS } from "../../lib/aiChecklist.js";
-import { resizeImage, uploadResizedBlob, blobToBase64 } from "../../lib/storage.js";
+import { getOfflineGuidance } from "../../lib/offlineGuidance.js";
+import { uploadPhoto } from "../../lib/storage.js";
 
 const SEVERITY_LABEL = { bilgi: "Bilgi", takip: "Takip Gerekli", acil: "ACİL" };
 const SEVERITY_COLOR = { bilgi: "#3FB37F", takip: "#E0B354", acil: "#DC5A34" };
 
 // Faz 4+5 — AI-CHECKLIST-PROJESI.md §6 (Klasik mod ve geri düşüş) + §7 (AI
 // kontrol ekranı) + §5.6 (fotoğraf akışı). Vazgeçilmez kural 1-2: klasik mod
-// SİLİNMEZ, AI oturumu HER ZAMAN klasik forma (aynı FillModal, aynı
-// buildMahalFillPatch — bkz. pages/MahalKontrol.jsx) düşebilir; kalıcı
-// "Klasik Forma Geç" düğmesi + otomatik düşüş (hata/timeout/kapsam
-// sağlanamıyor) burada uygulanıyor. Fotoğraf: en fazla 3/oturum (bkz.
-// lib/aiChecklist.js AI_CHECKLIST_LIMITS) — aynı görsel HEM Storage'a
-// (klasik moddaki "mahal-fotograflari" prefix'iyle, run.photoUrl olarak
-// AYNI yere) HEM Gemini'ye (inline base64, vision) gider — tek resize.
+// SİLİNMEZ, bu ekrandan HER ZAMAN klasik forma (aynı FillModal, aynı
+// buildMahalFillPatch — bkz. pages/MahalKontrol.jsx) geçilebilir; kalıcı
+// "Klasik Forma Geç" düğmesi burada uygulanıyor.
+//
+// Kullanıcı teyidiyle: "mahal kontrol testlerinde yapay zeka çok
+// düşünüyor. sorulara bağlı hazır soru ve hazır cevapları kütüphane veri
+// olarak tutsan ve ordan ilerlesen daha hızlı olur" — bu ekran ÖNCEDEN her
+// soru turunda Gemini'ye bir ağ isteği atıyordu (netlify/functions/
+// ai-checklist-turn.js); bu hem yavaştı hem de gereksizdi çünkü her
+// mahal noktasının SORULARI zaten `point.questions`'ta tam ve sabit bir
+// kütüphane (bkz. mockData.js) — Gemini'nin "sıradaki soru ne olsun"
+// diye karar vermesine hiç gerek yok. Artık bu ekran TAMAMEN yerel/anında
+// çalışıyor: sorular sırayla `questions[]`'tan gösterilir, olumsuz bir
+// cevap (failOn eşleşmesi/aralık dışı sayı) anında lib/offlineGuidance.js
+// kütüphanesinden (klasik formun da kullandığı AYNI kütüphane) bir
+// yönlendirme gösterir — ağ/AI beklemesi YOK. Sonuç özeti de aynı
+// kütüphaneden yerel olarak üretilir (en kötü şiddet + uygunsuz madde
+// listesi). Ekstra fayda: artık çevrimdışıyken de bu akış (offcheck'te
+// olduğu gibi) tam çalışıyor, önceden anında klasik forma düşüyordu.
+//
 // Kullanıcı teyidiyle: "soğutma odasının qr'ı okutuldu... chiller 1'den
 // başla seçti... tekrar tek ekran soruyu sor onayladıkça diğer soruya geç...
 // chiller bittiğinde diğerine geç" — tek bir ekipmanla sınırlı kalmak yerine
@@ -51,33 +64,28 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   const [inspector, setInspector] = useState(currentUser || "");
   // "offcheck" — kullanıcı teyidiyle: "bakım anında ekipmanlardan biri kapalı
   // olabilir kapalı olanları için sistem kapalı işareti koy... bu mantık tüm
-  // kontroller için geçerli" — AI'ya sorulmadan (ağ gerektirmez, anında),
-  // odadaki HER ekipmana geçilmeden önce sorulur.
-  const [mode, setMode] = useState("offcheck");
-  const [history, setHistory] = useState([]);
-  const [turnCount, setTurnCount] = useState(0);
-  const [current, setCurrent] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [fallbackNotice, setFallbackNotice] = useState(null);
+  // kontroller için geçerli" — odadaki HER ekipmana geçilmeden önce sorulur,
+  // hep yerel/anında.
+  const [mode, setMode] = useState("offcheck"); // offcheck | ask | guidance | finalize | classic
+  const [qIndex, setQIndex] = useState(0);
+  const [answers, setAnswers] = useState({});
   const [draft, setDraft] = useState("");
-  const [photoCount, setPhotoCount] = useState(0);
-  const [sessionPhotoUrl, setSessionPhotoUrl] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const startedAtRef = useRef(Date.now());
+  const [pendingGuidance, setPendingGuidance] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   // Kuyruktaki her yeni ekipmana geçildiğinde (mount dahil — activeIndex 0
-  // ile başlar) sohbet durumu sıfırlanır, run "Üzr. Çalışılıyor" kaydedilir
-  // ve önce "kapalı mı?" sorusu gösterilir.
+  // ile başlar) durum sıfırlanır, run "Üzr. Çalışılıyor" kaydedilir ve önce
+  // "kapalı mı?" sorusu gösterilir.
   useEffect(() => {
-    setHistory([]);
-    setTurnCount(0);
-    setCurrent(null);
-    setFallbackNotice(null);
-    setDraft("");
-    setPhotoCount(0);
-    setSessionPhotoUrl(null);
     setMode("offcheck");
-    startedAtRef.current = Date.now();
+    setQIndex(0);
+    setAnswers({});
+    setDraft("");
+    setPendingGuidance(null);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
     updateState(startMahalRun(state, point, activeLocation, currentUser));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex]);
@@ -94,113 +102,93 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   }
 
   function confirmOn() {
-    setMode("ai");
-    runTurn([], 0, null);
+    setMode("ask");
   }
 
-  function fallbackToClassic(reason) {
-    setFallbackNotice(reason);
-    setMode("classic");
+  // Klasik formdaki AYNI kural (bkz. MahalKontrol.jsx satır ~378/382): sayı
+  // tipi aralık dışıysa, diğerleri failOn ile eşleşiyorsa "uygunsuz" sayılır.
+  function isNumeric(q) { return q.type === "sayi"; }
+  function isFail(q, value) {
+    if (isNumeric(q)) {
+      if (value === "" || value == null) return false;
+      const n = Number(value);
+      return Number.isFinite(n) && (n < q.min || n > q.max);
+    }
+    return value === (q.failOn || "Hayır");
   }
 
-  async function runTurn(nextHistory, nextTurnCount, photo) {
-    setLoading(true);
-    if (Date.now() - startedAtRef.current > AI_CHECKLIST_LIMITS.sessionTimeoutMs) {
-      fallbackToClassic("Oturum süresi doldu.");
-      return;
-    }
-    if (!navigator.onLine) {
-      fallbackToClassic("Bağlantı yok.");
-      return;
-    }
-    try {
-      const assetContext = { manufacturer: activeAsset?.manufacturer, model: activeAsset?.model, category: activeAsset?.category, criticality: activeAsset?.criticality, floorLabel: point.floorLabel };
-      const turn = await requestAiChecklistTurn({ assetContext, questions, history: nextHistory, turnCount: nextTurnCount, photoBase64: photo?.base64, photoMimeType: photo?.mimeType });
-      if (turn.action === "request_photo") {
-        if (photoCount >= AI_CHECKLIST_LIMITS.maxPhotosPerSession) {
-          fallbackToClassic("Fotoğraf sınırına ulaşıldı — klasik formda devam edin.");
-          return;
-        }
-        setCurrent(turn);
-        setLoading(false);
-        return;
-      }
-      if (turn.action === "finalize") {
-        const coverage = computeCoverage(questions.map((q, i) => ({ id: String(i), critical: false })), nextHistory);
-        if (!coverage.complete) {
-          // Kabul kriteri: kapsam eksikken finalize reddedilir — AI yanılıp
-          // erken sonuçlandırmak istese bile ilk cevapsız maddeyi sordururuz.
-          const answeredIdx = new Set(nextHistory.map((h) => Number(h.questionId)));
-          const idx = questions.findIndex((_, i) => !answeredIdx.has(i));
-          setCurrent({ action: "ask", question: { id: String(idx), text: questions[idx].text, type: "metin" } });
-          setLoading(false);
-          return;
-        }
-      }
-      setCurrent(turn);
-    } catch {
-      fallbackToClassic("Yapay zeka yanıt vermedi.");
-      return;
-    } finally {
-      setLoading(false);
-    }
+  function goNext() {
+    if (qIndex + 1 < questions.length) { setQIndex((i) => i + 1); setMode("ask"); }
+    else setMode("finalize");
   }
 
   function submitAnswer(value) {
-    if (!current?.question) return;
-    const nextHistory = [...history, { questionId: current.question.id, text: current.question.text, value }];
-    const nextTurnCount = turnCount + 1;
-    setHistory(nextHistory);
-    setTurnCount(nextTurnCount);
+    const q = questions[qIndex];
+    setAnswers((a) => ({ ...a, [qIndex]: value }));
     setDraft("");
-    if (nextTurnCount >= AI_CHECKLIST_LIMITS.maxTurns) { fallbackToClassic("Tur sınırına ulaşıldı."); return; }
-    runTurn(nextHistory, nextTurnCount, null);
+    if (isFail(q, value)) {
+      const guidance = getOfflineGuidance(q, activeAsset);
+      if (guidance) { setPendingGuidance(guidance); setMode("guidance"); return; }
+    }
+    goNext();
   }
 
-  // Aynı seçilen dosyayı TEK sefer küçültüp hem Storage'a (kalıcı kayıt,
-  // klasik moddakiyle aynı yere) hem Gemini'ye (base64, vision) gönderir.
-  async function handlePhotoSelected(e) {
+  function acknowledgeGuidance() {
+    setPendingGuidance(null);
+    goNext();
+  }
+
+  // Kullanıcı teyidiyle bulunan hata (klasik formdaki AYNI çözüm): "çekilen
+  // fotoğraf hiç kaydedilmiyordu" — dosya base64'e çevrilip tutulmuyor,
+  // sadece File nesnesi + hafif önizleme URL'i tutulur; gerçek yükleme
+  // (bkz. lib/storage.js uploadPhoto) onaylanınca yapılır.
+  function handlePhoto(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingPhoto(true);
-    try {
-      const blob = await resizeImage(file);
-      const [path, base64] = await Promise.all([uploadResizedBlob(blob, "mahal-fotograflari"), blobToBase64(blob)]);
-      setSessionPhotoUrl(path);
-      const nextPhotoCount = photoCount + 1;
-      const nextTurnCount = turnCount + 1;
-      setPhotoCount(nextPhotoCount);
-      setTurnCount(nextTurnCount);
-      if (nextTurnCount >= AI_CHECKLIST_LIMITS.maxTurns) { fallbackToClassic("Tur sınırına ulaşıldı."); return; }
-      await runTurn(history, nextTurnCount, { base64, mimeType: "image/jpeg" });
-    } catch (err) {
-      console.error("Fotoğraf işlenemedi:", err);
-      fallbackToClassic("Fotoğraf yüklenemedi.");
-    } finally {
-      setUploadingPhoto(false);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+  }
+
+  // Yerel özet — önceden burada Gemini'den "diagnosis" isteniyordu, artık
+  // aynı offlineGuidance kütüphanesinden anında üretiliyor: en kötü şiddet +
+  // uygunsuz madde listesi. Hiç uygunsuzluk yoksa "Tüm maddeler uygun."
+  function buildLocalDiagnosis() {
+    const fails = questions
+      .map((q, i) => ({ q, i, value: answers[i] }))
+      .filter(({ q, value }) => isFail(q, value));
+    if (fails.length === 0) return { summary: "Tüm maddeler uygun.", severity: "bilgi", fails: [] };
+    const severities = fails.map(({ q }) => getOfflineGuidance(q, activeAsset)?.severity).filter(Boolean);
+    const severity = severities.includes("acil") ? "acil" : severities.includes("takip") ? "takip" : "bilgi";
+    const summary = `${fails.length} maddede uygunsuzluk: ${fails.map(({ q }) => q.text).join(", ")}`;
+    return { summary, severity, fails };
+  }
+
+  // AYNI buildMahalFillPatch (klasik modun kullandığı) ile yazılır — "Aynı
+  // sonuç şemasına yazar" kuralı (madde 1).
+  async function submitFillFromAi() {
+    const diag = buildLocalDiagnosis();
+    let photoUrl = null;
+    if (photoFile) {
+      setUploading(true);
+      try {
+        photoUrl = await uploadPhoto(photoFile, "mahal-fotograflari");
+      } catch (err) {
+        console.error("Fotoğraf yüklenemedi:", err);
+      } finally {
+        setUploading(false);
+      }
     }
-  }
-
-  function buildInitialAnswersForClassic() {
-    const answers = {};
-    history.forEach((h) => { const idx = Number(h.questionId); if (!Number.isNaN(idx)) answers[idx] = h.value; });
-    return answers;
-  }
-
-  // AI onaylanınca AYNI buildMahalFillPatch (klasik modun kullandığı) ile
-  // yazılır — "Aynı sonuç şemasına yazar" kuralı (madde 1). Oturumda bir
-  // fotoğraf çekildiyse (sessionPhotoUrl) o da klasik modla AYNI alana
-  // (run.photoUrl) bağlanır.
-  function submitFillFromAi() {
-    const answers = buildInitialAnswersForClassic();
-    const note = current?.diagnosis?.summary || "";
-    let patch = buildMahalFillPatch(state, point, activeLocation, { inspector, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
+    let patch = buildMahalFillPatch(state, point, activeLocation, { inspector, answers, note: diag.summary, photo: !!photoUrl, photoUrl, startedAt: new Date().toISOString() });
     if (patch.mahalRuns) {
       patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (activeLocation?.key || null) ? { ...r, verifiedBy: "qr", aiAssisted: true } : r)) };
     }
     updateState(patch);
     advance();
   }
+
+  function buildInitialAnswersForClassic() { return answers; }
+
+  function fallbackToClassic() { setMode("classic"); }
 
   if (mode === "classic") {
     return (
@@ -219,11 +207,12 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
     );
   }
 
+  const guidanceColor = pendingGuidance ? (pendingGuidance.severity === "acil" ? "#DC5A34" : pendingGuidance.severity === "takip" ? "#B4551E" : "#6E7671") : null;
+  const diag = mode === "finalize" ? buildLocalDiagnosis() : null;
+
   // Kullanıcı teyidiyle: "qr okuttuğunda form ekranı ortalasın personelin
   // odağı form olsun" — alt sheet (flex-end) yerine klasik FillModal'ın
-  // ZATEN kullandığı ortalanmış modal deseni (bkz. MahalKontrol.jsx, ör.
-  // satır 617) — arkadaki kat/liste ekranı dikkat dağıtmasın, teknisyenin
-  // tüm odağı bu form olsun.
+  // ZATEN kullandığı ortalanmış modal deseni.
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 270, background: "rgba(20,49,40,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto" }}>
@@ -237,8 +226,8 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
           </div>
           <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>
             {queue.length > 1 && `${itemNoun === "ekipman" ? "Ekipman" : "Alan"} ${activeIndex + 1}/${queue.length} · `}
-            {mode === "offcheck" ? "durum kontrolü" : `Soru ${turnCount + 1} · yapay zeka destekli kontrol`}
-            {sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}
+            {mode === "offcheck" ? "durum kontrolü" : `Soru ${Math.min(qIndex + 1, questions.length)}/${questions.length}`}
+            {photoPreviewUrl ? " · 📷 fotoğraf eklendi" : ""}
           </div>
 
           {/* Kullanıcı teyidiyle: "personel kendi kullanıcı ile giriş
@@ -255,8 +244,6 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
 
           {!inspector && <p style={{ fontSize: 12, color: T.dimmer, fontStyle: "italic" }}>Kontrole başlamak için önce kontrolü yapan personeli seçin.</p>}
 
-          {fallbackNotice && <div style={{ fontSize: 11.5, color: "#DC5A34", marginBottom: 8 }}>{fallbackNotice}</div>}
-
           {inspector && mode === "offcheck" && (
             <div>
               <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{itemNoun === "ekipman" ? "Bu ekipman şu an kapalı/devre dışı mı?" : "Bu alan şu an kapalı/erişime kapalı mı?"}</p>
@@ -267,58 +254,70 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
             </div>
           )}
 
-          {(loading || uploadingPhoto) && <p style={{ fontSize: 13, color: T.dim }}>{uploadingPhoto ? "Fotoğraf yükleniyor…" : "Yapay zeka düşünüyor…"}</p>}
-
-          {!loading && !uploadingPhoto && current?.action === "ask" && current.question && (
+          {inspector && mode === "ask" && questions[qIndex] && (
             <>
-              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{current.question.text}</p>
-              {current.question.type === "bool" ? (
+              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{questions[qIndex].text}</p>
+              {isNumeric(questions[qIndex]) ? (
+                <>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Input type="number" value={draft} onChange={(e) => setDraft(e.target.value)}
+                      placeholder={questions[qIndex].unit || ""} style={{ flex: 1 }} />
+                    <Button onClick={() => draft !== "" && submitAnswer(draft)} disabled={draft === ""}>Gönder</Button>
+                  </div>
+                  <div style={{ fontSize: 11, color: T.dimmer, marginTop: 6 }}>Beklenen aralık: {questions[qIndex].min}–{questions[qIndex].max} {questions[qIndex].unit}</div>
+                </>
+              ) : (
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button onClick={() => submitAnswer("Evet")} style={{ flex: 1 }}>Evet</Button>
                   <Button variant="ghost" onClick={() => submitAnswer("Hayır")} style={{ flex: 1 }}>Hayır</Button>
-                </div>
-              ) : current.question.type === "secim" && current.question.options?.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {current.question.options.map((opt) => <Button key={opt} variant="ghost" onClick={() => submitAnswer(opt)}>{opt}</Button>)}
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Input type={current.question.type === "sayi" ? "number" : "text"} value={draft} onChange={(e) => setDraft(e.target.value)}
-                    placeholder={current.question.unit || ""} style={{ flex: 1 }} />
-                  <Button onClick={() => draft !== "" && submitAnswer(draft)} disabled={draft === ""}>Gönder</Button>
                 </div>
               )}
             </>
           )}
 
-          {!loading && !uploadingPhoto && current?.action === "request_photo" && (
-            <>
-              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 4 }}>{current.question?.text || "Görsel doğrulama için bir fotoğraf ekleyin."}</p>
-              <p style={{ fontSize: 11, color: T.dimmer, marginBottom: 10 }}>{current.question?.why}</p>
-              <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1px dashed ${T.line}`, borderRadius: 10, padding: "16px 12px", cursor: "pointer", color: T.dim, fontSize: 13 }}>
-                <Camera size={16} /> Fotoğraf çek / seç
-                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelected} style={{ display: "none" }} />
-              </label>
-            </>
+          {/* Kullanıcı teyidiyle: "olumsuz durumlara karşı cevaplar
+              yönlendirmeler" — offlineGuidance eşleşmesi ANINDA gösterilir,
+              klasik formdaki AYNI kart (bkz. MahalKontrol.jsx ~892). */}
+          {mode === "guidance" && pendingGuidance && (
+            <div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: `${guidanceColor}12`, border: `1px solid ${guidanceColor}33`, marginBottom: 14 }}>
+                {pendingGuidance.escalate && (
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: guidanceColor, marginBottom: 6, textTransform: "uppercase" }}>
+                    {pendingGuidance.severity === "acil" ? "⚠ Acil — sorumluyu arayın" : "Takip gerekiyor"}
+                  </div>
+                )}
+                <div style={{ fontSize: 12.5, color: T.ink }}><b>Olası neden:</b> {pendingGuidance.possibleCauses.join(", ")}</div>
+                <div style={{ fontSize: 12.5, color: T.ink, marginTop: 4 }}><b>İlk aksiyon:</b> {pendingGuidance.firstActions.join(" · ")}</div>
+                {pendingGuidance.brandNote && (
+                  <div style={{ fontSize: 12, color: T.ink, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${guidanceColor}33` }}><b>{pendingGuidance.brandNote.manufacturer} notu:</b> {pendingGuidance.brandNote.text}</div>
+                )}
+              </div>
+              <Button onClick={acknowledgeGuidance} style={{ width: "100%" }}>Gördüm, Devam Et</Button>
+            </div>
           )}
 
-          {!loading && !uploadingPhoto && current?.action === "finalize" && (
+          {mode === "finalize" && diag && (
             <div>
-              <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: SEVERITY_COLOR[current.diagnosis?.severity] || T.dim, background: `${SEVERITY_COLOR[current.diagnosis?.severity] || T.dim}22`, borderRadius: 999, padding: "3px 10px", marginBottom: 8 }}>
-                {SEVERITY_LABEL[current.diagnosis?.severity] || "Sonuç"}
+              <div style={{ display: "inline-block", fontSize: 10.5, fontWeight: 800, color: SEVERITY_COLOR[diag.severity] || T.dim, background: `${SEVERITY_COLOR[diag.severity] || T.dim}22`, borderRadius: 999, padding: "3px 10px", marginBottom: 8 }}>
+                {SEVERITY_LABEL[diag.severity] || "Sonuç"}
               </div>
-              <p style={{ fontSize: 13.5, color: T.ink, margin: "0 0 6px" }}>{current.diagnosis?.summary || "Kontrol tamamlandı."}</p>
-              {current.diagnosis?.recommendedAction && <p style={{ fontSize: 12.5, color: T.dim, margin: "0 0 10px" }}>Öneri: {current.diagnosis.recommendedAction}</p>}
-              {current.diagnosis?.confidence != null && <p style={{ fontSize: 11, color: T.dimmer, margin: "0 0 12px" }}>Güven skoru: %{Math.round(current.diagnosis.confidence * 100)} — bu bir ÖNERİDİR, kaydı siz onaylıyorsunuz.</p>}
+              <p style={{ fontSize: 13.5, color: T.ink, margin: "0 0 12px" }}>{diag.summary}</p>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, border: `1px dashed ${T.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", color: T.dim, fontSize: 13, marginBottom: 12 }}>
+                <Camera size={16} /> {photoFile ? "Fotoğraf seçildi ✓" : "Fotoğraf ekle (opsiyonel)"}
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} style={{ display: "none" }} />
+              </label>
+              {photoPreviewUrl && <img src={photoPreviewUrl} alt="Önizleme" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 10, marginBottom: 12 }} />}
+
               <div style={{ display: "flex", gap: 8 }}>
-                <Button onClick={submitFillFromAi} style={{ flex: 1 }}>{activeIndex + 1 < queue.length ? "Onayla, Sonrakine Geç" : "Onayla ve Kaydet"}</Button>
-                <Button variant="ghost" onClick={() => fallbackToClassic(null)}>Düzenle</Button>
+                <Button onClick={submitFillFromAi} disabled={uploading} style={{ flex: 1 }}>{uploading ? "Kaydediliyor…" : activeIndex + 1 < queue.length ? "Onayla, Sonrakine Geç" : "Onayla ve Kaydet"}</Button>
+                <Button variant="ghost" onClick={fallbackToClassic}>Düzenle</Button>
               </div>
             </div>
           )}
 
-          {mode !== "offcheck" && (
-            <button onClick={() => fallbackToClassic(null)} style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.dimmer, marginTop: 14 }}>
+          {mode !== "offcheck" && mode !== "guidance" && (
+            <button onClick={fallbackToClassic} style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.dimmer, marginTop: 14 }}>
               <ShieldAlert size={12} /> Klasik Forma Geç
             </button>
           )}
