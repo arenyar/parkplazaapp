@@ -358,13 +358,7 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
         const allLocs = getLocations(point, state);
         const locs = focusFloorLabel ? allLocs.filter((l) => l.floorLabel == null || l.floorLabel === focusFloorLabel) : allLocs;
         if (locs.length === 1) {
-          const loc = locs[0];
-          const isEquipmentGroup = point.locations && point.locations.length > 1 && !loc.floorLabel;
-          if (state.aiChecklistMode === "ai_first" && isEquipmentGroup) {
-            setAiQueueTarget({ point, locations: rotateLocations(point.locations, loc.key) });
-          } else {
-            startAndOpenFill(point, loc, "qr");
-          }
+          startAndOpenFill(point, locs[0], "qr");
         } else if (locs.length > 1) {
           const items = locs.map((loc) => {
             const nonconforming = hasNonConformity(point, state, loc.key);
@@ -594,18 +588,23 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
               <div key={c.key} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${t.hairline}` }}>
                 <button
                   onClick={() => {
-                    // AI Checklist (ai_first) + ekipman-bazlı gruplu bir
-                    // mahal (birden fazla `locations`, floorLabel'sız —
-                    // guv_tur/fireEquipment gibi çok-katlı türetilmiş
-                    // konumlarla karışmasın diye) → seçilen ekipmandan
-                    // başlayan, odayı sırayla gezen AI sohbeti açılır.
-                    // Aksi halde (AI kapalı, tek konum, veya patrol-tipi
-                    // çok-katlı konum) eskisi gibi doğrudan klasik form.
-                    const groupLocs = c.point.locations;
-                    const isEquipmentGroup = groupLocs && groupLocs.length > 1 && !c.loc?.floorLabel;
-                    if (state.aiChecklistMode === "ai_first" && isEquipmentGroup) {
+                    // Kullanıcı teyidiyle: "teknik'te yaptığımız soru cevap
+                    // sistemini diğer departmanlarda da yap, sistem kompleks
+                    // olsun" — bu artık sadece mtd3/mtd4 gibi ekipman
+                    // gruplarıyla sınırlı değil: AI Checklist (ai_first)
+                    // açıkken, o an EKRANDA GÖRÜNEN listedeki (roomPicker,
+                    // zaten kata/döneme göre doğru şekilde daraltılmış —
+                    // ör. guv_tur'da tek katın 2 tarafı, Temizlik'te 7 alan)
+                    // AYNI noktaya (c.point) ait TÜM konumlar bir AI kuyruğu
+                    // oluşturuyor; seçilen konumdan başlayıp sırayla geziyor.
+                    // Böylece Güvenlik'in kat devriyesi (Beşiktaş→Sarıyer) ve
+                    // Temizlik'in alan turu (Lobi→WC→Otopark→...) de aynı
+                    // "tek soru sor, onayla, sonrakine geç" deneyimini alıyor.
+                    const sameLocs = (roomPicker.items || roomPicker.group.items).filter((it) => it.point.id === c.point.id).map((it) => it.loc).filter(Boolean);
+                    const isMultiLocation = sameLocs.length > 1;
+                    if (state.aiChecklistMode === "ai_first" && isMultiLocation) {
                       setRoomPicker(null);
-                      setAiQueueTarget({ point: c.point, locations: rotateLocations(groupLocs, c.loc.key) });
+                      setAiQueueTarget({ point: c.point, locations: rotateLocations(sameLocs, c.loc.key) });
                     } else {
                       startAndOpenFill(c.point, c.loc);
                     }

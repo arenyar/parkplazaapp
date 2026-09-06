@@ -6,6 +6,7 @@ import { TaskList } from "../components/TaskList.jsx";
 import { TaskForm, emptyTask } from "../components/TaskForm.jsx";
 import { DepartmentTaskListScreen } from "../mobile/list/DepartmentTaskListScreen.jsx";
 import { MahalKontrol } from "./MahalKontrol.jsx";
+import { MahalGridScreen } from "../mobile/grid/MahalGridScreen.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
 import { useQuickWorkFlow, QuickWorkFlowModals } from "../mobile/create/QuickWorkFlow.jsx";
 import { AssetScanSheet } from "../mobile/create/AssetScanSheet.jsx";
@@ -33,6 +34,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
   const [aiChecklistTarget, setAiChecklistTarget] = useState(null);
   const [focusPointId, setFocusPointId] = useState(null);
   const [focusLocationKey, setFocusLocationKey] = useState(null);
+  const [focusFloorLabel, setFocusFloorLabel] = useState(null);
   // Ana Sayfa'daki departman kısayollarından (bkz. Dashboard.jsx) gelirse
   // deepLink.tab hangi sekmeye gidileceğini belirtir. "quickRequest"/
   // "startTask" — bkz. mobile/create/QuickWorkFlow.jsx'teki not — BURADA
@@ -44,6 +46,19 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
     if (deepLink.action === "assetScan") {
       setTab("mahal");
       setAssetScan({ assetId: deepLink.assetId, assetName: deepLink.assetName, matchedPointId: deepLink.matchedPointId, matchedPointFloorLabel: deepLink.matchedPointFloorLabel, matchedLocationKey: deepLink.matchedLocationKey });
+      onConsumeDeepLink();
+      return;
+    }
+    // Kullanıcı teyidiyle: "teknik'te yaptığımız soru cevap sistemini diğer
+    // departmanlarda da yap" — bkz. Teknik.jsx/Guvenlik.jsx'teki AYNI not:
+    // mobilde bir mahal QR'ı (`?mahal=...&floor=...`) okutulunca Temizlik'in
+    // kendi MahalGridScreen'ine (aşağıda, artık masaüstü MahalKontrol.jsx
+    // yerine mobilde bu kullanılıyor) odaklanma bilgisi böyle ulaşır.
+    if (mobileMode && deepLink.pointId && !deepLink.action) {
+      setTab("mahal");
+      setFocusPointId(deepLink.pointId);
+      setFocusLocationKey(deepLink.locationKey || null);
+      setFocusFloorLabel(deepLink.floorLabel || null);
       onConsumeDeepLink();
       return;
     }
@@ -84,7 +99,11 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
         </div>
       )}
 
-      {tab === "mahal" && <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={focusPointId ? { pointId: focusPointId, locationKey: focusLocationKey } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); setFocusLocationKey(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />}
+      {tab === "mahal" && (
+        mobileMode
+          ? <MahalGridScreen state={state} updateState={updateState} currentUserName={currentUser} department="Temizlik" canWrite={canWrite} focusPointId={focusPointId} focusLocationKey={focusLocationKey} focusFloorLabel={focusFloorLabel} onConsumeFocus={() => { setFocusPointId(null); setFocusLocationKey(null); setFocusFloorLabel(null); }} />
+          : <MahalKontrol state={state} updateState={updateState} currentUser={currentUser} department="Temizlik" deepLink={focusPointId ? { pointId: focusPointId, locationKey: focusLocationKey } : deepLink} onConsumeDeepLink={() => { setFocusPointId(null); setFocusLocationKey(null); onConsumeDeepLink(); }} canWrite={canWrite} mobileMode={mobileMode} onQuickRequest={quick.start} />
+      )}
 
       {tab === "gorevler" && (
         mobileMode ? (

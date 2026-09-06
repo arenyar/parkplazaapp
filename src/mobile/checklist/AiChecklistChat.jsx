@@ -34,6 +34,12 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   const activeLocation = queue[activeIndex] ?? null;
   const questions = activeLocation?.questions || point.questions;
   const activeAsset = locations ? (state.assets || []).find((a) => a.id === (activeLocation?.assetId || point.assetId)) : asset;
+  // Kullanıcı teyidiyle: "temizlikte ve güvenlikte ekipman çalışıyor mu
+  // kontrolü sorma alan kontrolü yapılıyor" — "ekipman" kelimesi sadece
+  // Teknik'in fiziksel varlıkları (assetId'si olan) için doğru; Temizlik'in
+  // alanları (Lobi, Bahçe) ve Güvenlik'in kat/taraf devriye konumlarının
+  // hiçbirinde assetId yok — bunlar "alan/konum". Metin buna göre değişiyor.
+  const itemNoun = activeAsset ? "ekipman" : "alan";
   const team = state.team.filter((tm) => tm.department === department);
   // Kullanıcı teyidiyle: "personel kendi kullanıcı ile giriş yaptığında tüm
   // formlarda personel seçiminde işi yapan kendi olmalı eğer farklı kişi
@@ -230,7 +236,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex" }}><X size={18} /></button>
           </div>
           <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>
-            {queue.length > 1 && `Ekipman ${activeIndex + 1}/${queue.length} · `}
+            {queue.length > 1 && `${itemNoun === "ekipman" ? "Ekipman" : "Alan"} ${activeIndex + 1}/${queue.length} · `}
             {mode === "offcheck" ? "durum kontrolü" : `Soru ${turnCount + 1} · yapay zeka destekli kontrol`}
             {sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}
           </div>
@@ -253,10 +259,10 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
 
           {inspector && mode === "offcheck" && (
             <div>
-              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>Bu ekipman şu an kapalı/devre dışı mı?</p>
+              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{itemNoun === "ekipman" ? "Bu ekipman şu an kapalı/devre dışı mı?" : "Bu alan şu an kapalı/erişime kapalı mı?"}</p>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="ghost" onClick={markOff} style={{ flex: 1 }}>Evet, kapalı</Button>
-                <Button onClick={confirmOn} style={{ flex: 1 }}>Hayır, çalışıyor</Button>
+                <Button onClick={confirmOn} style={{ flex: 1 }}>{itemNoun === "ekipman" ? "Hayır, çalışıyor" : "Hayır, açık"}</Button>
               </div>
             </div>
           )}
