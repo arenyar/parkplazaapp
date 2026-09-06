@@ -16,6 +16,7 @@ import { DEPARTMENT_VIEW } from "./lib/departmentView.js";
 import { resolveAssetScan } from "./lib/assetScan.js";
 import { T } from "./theme.js";
 
+import { SurveyPage } from "./pages/SurveyPage.jsx";
 import { Login } from "./pages/Login.jsx";
 import { MobileLogin } from "./pages/MobileLogin.jsx";
 import { MobileApp } from "./MobileApp.jsx";
@@ -92,6 +93,20 @@ export default function App() {
     const forcedDesktop = new URLSearchParams(window.location.search).get("masaustu") === "1";
     if (path === "/" && !forcedDesktop && window.innerWidth <= 900) return true;
     return false;
+  });
+  // Kullanıcı teyidiyle: "link iş emri kapatılmıştır ile birlikte gidecek...
+  // linke tıkladığında hizmetleri değerlendirecek" — anket linkine tıklayan
+  // ofis yetkilisinin bu uygulamada hesabı yok, bu yüzden `/anket` TÜM giriş
+  // kontrollerinden (fbUser/currentAccount vb. — aşağıdaki early return'ler)
+  // ÖNCE, tamamen bağımsız render edilir (bkz. pages/SurveyPage.jsx). Diğer
+  // route sabitleri (isMobileRoute) gibi mount'ta bir kez okunur.
+  const [surveyParams] = useState(() => {
+    if (window.location.pathname !== "/anket") return null;
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get("t");
+    const k = q.get("k");
+    if (!t || !k) return null;
+    return { taskId: t, token: k, companyName: q.get("c") || "" };
   });
   // Kullanıcı teyidiyle: "Mobil uygulama son kullanıcının sahada veri
   // girdiği alan olmalı burda formlar üzerinde değişiklik yapmak yada
@@ -351,6 +366,7 @@ export default function App() {
   // yanlışlıkla yanıp sönmesini önler), fbUser yok (Login ekranı), fbUser var
   // ama state.users/team eşleşmesi henüz gelmedi (Firestore senkron sürüyor
   // — kısa "Yükleniyor" ekranı, Login DEĞİL, çünkü giriş zaten başarılı oldu).
+  if (surveyParams) return <SurveyPage taskId={surveyParams.taskId} token={surveyParams.token} companyName={surveyParams.companyName} />;
   if (fbUser === undefined) return <div style={{ minHeight: "100vh", background: T.bg }} />;
   if (!fbUser) {
     return isMobileRoute

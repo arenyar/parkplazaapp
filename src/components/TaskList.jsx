@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, Trash2, Play, CheckCircle2, Users, X } from "lucide-react";
+import { Pencil, Trash2, Play, CheckCircle2, Users, X, Star } from "lucide-react";
 import { T, PRIORITY_STYLES } from "../theme.js";
 import { Card, Pagination } from "./ui.jsx";
 import { SlaBadge } from "./SlaBadge.jsx";
@@ -72,6 +72,14 @@ export function TaskList({ tasks, onEdit, onDelete, pageSize = 20, emptyText = "
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.ink }}>#{t.ticketNo}{showDept ? ` · ${t.department}` : ""} · {t.issueType}</div>
                 <div style={{ fontSize: 12, color: T.dim }}>{t.description}</div>
                 {t.company && <div style={{ fontSize: 11, color: T.accent, marginTop: 2, fontWeight: 600 }}>Firma: {t.company}{t.location ? ` · ${t.location}` : ""}</div>}
+                {/* Kullanıcı teyidiyle: anket linkinden gelen yanıt (bkz. pages/SurveyPage.jsx,
+                    netlify/functions/submit-survey.js) — sadece yanıtlanmışsa görünür. */}
+                {t.surveyRating && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }} title={t.surveyRespondedAt ? fmtDate(t.surveyRespondedAt) : undefined}>
+                    {[1, 2, 3, 4, 5].map((n) => <Star key={n} size={11} color="#C08A2E" fill={n <= t.surveyRating ? "#C08A2E" : "none"} aria-hidden="true" />)}
+                    {t.surveyNote && <span style={{ fontSize: 11, color: T.dim, fontStyle: "italic" }}>"{t.surveyNote}"</span>}
+                  </div>
+                )}
                 {!t.company && t.viaMahal && <div style={{ fontSize: 11, color: "#DC5A34", marginTop: 2, fontWeight: 600 }}>📱 Saha Kaydı — Mahal Kontrol{t.location ? ` · ${t.location}` : ""}</div>}
                 <div style={{ fontSize: 11, color: T.dimmer, marginTop: 2 }}>Termin: {fmtDate(t.dueDate)} · Atanan: {t.assignee || "—"}</div>
               </div>

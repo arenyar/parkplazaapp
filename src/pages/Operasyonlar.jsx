@@ -12,6 +12,7 @@ import { uploadPhoto } from "../lib/storage.js";
 import StoredImage from "../components/StoredImage.jsx";
 import { stampStatusTiming } from "../lib/taskTiming.js";
 import { sendEmail } from "../lib/email.js";
+import { generateSurveyToken, buildSurveyLink } from "../lib/survey.js";
 
 const STATUSES = ["Yapılacak", "Üzr. Çalışılıyor", "Tamamlandı", "İptal"];
 
@@ -204,12 +205,14 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   // ARKA PLANDA (await edilmiyor, kayıt zaten kaydedildi) — e-posta
   // başarısız olursa kayıt geri alınmaz, sadece konsola düşer.
   //
-  // "Anket" — kullanıcının istediği tıklanabilir yıldız arayüzü, anonim
-  // yanıt toplayan YENİ ve güvenlik açısından dikkat gerektiren bir
-  // backend (Firebase Admin SDK + ayrı bir Netlify fonksiyonu, açık bir
-  // Firestore yazma kuralı YERİNE) gerektirir — bu henüz yapılmadı, bu
-  // konu ayrıca konuşulmalı. Bunun yerine MVP: firma yetkilisinden e-posta
-  // YANITI olarak puan/not istenir — ek altyapı gerektirmez.
+  // "Anket" — kullanıcı teyidiyle: "linke tıkladığında hizmetleri
+  // değerlendirecek ve 5 yıldız üzerinden not yazmak isterse yazacak...
+  // link iş emri kapatılmıştır ile birlikte gidecek". Daha önce burada
+  // MVP olarak e-posta YANITI isteniyordu (gerçek tıklanabilir anket ayrı
+  // bir backend gerektirdiği için) — artık o backend var (bkz.
+  // netlify/functions/submit-survey.js, pages/SurveyPage.jsx): task
+  // "Tamamlandı" olduğunda save()'te üretilen tek-kullanımlık
+  // task.surveyToken ile gerçek bir link kuruluyor.
   async function notifyByEmail(task, kind) {
     const notifyTo = state.notificationEmail;
     try {
@@ -217,6 +220,7 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
         await sendEmail({ to: notifyTo, subject: `Yeni Talep/Şikayet — #${task.ticketNo}`, text: `Yeni bir talep/şikayet kaydı oluşturuldu.\n\n${buildRequestSummary(task)}` });
       }
       if (kind === "completed") {
+        const surveyLink = task.surveyToken ? buildSurveyLink(window.location.origin, task.id, task.surveyToken, task.company) : null;
         if (notifyTo) {
           await sendEmail({ to: notifyTo, subject: `Talep Tamamlandı — #${task.ticketNo}`, text: `Bir talep/şikayet tamamlandı.\n\n${buildRequestSummary(task)}\n\nÇözüm: ${task.resolution}` });
         }
@@ -225,7 +229,7 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
           await sendEmail({
             to: companyRec.email,
             subject: `Talebiniz Tamamlandı — #${task.ticketNo}`,
-            text: `Sayın Yetkili,\n\n"${task.description}" konulu talebiniz tamamlanmıştır.\n\nYapılan işlem: ${task.resolution}\n\nHizmetimizi değerlendirmek isterseniz bu e-postaya 1-5 arası bir puan ve varsa kısa bir notla yanıt verebilirsiniz.\n\nSaygılarımızla,\nPark Plaza Maslak Yönetimi`,
+            text: `Sayın Yetkili,\n\n"${task.description}" konulu talebiniz tamamlanmıştır.\n\nYapılan işlem: ${task.resolution}\n\nHizmetimizi değerlendirmek için: ${surveyLink}\n\nSaygılarımızla,\nPark Plaza Maslak Yönetimi`,
           });
         }
       }
@@ -267,6 +271,12 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
       const prevTask = state.tasks.find((t) => t.id === form.id);
       prevStatus = prevTask?.status;
       finalTask = stampStatusTiming(prevStatus, { ...prevTask, ...payload, updatedAt: new Date().toISOString(), updatedBy: currentUser });
+      // Anket linki (bkz. notifyByEmail "completed" notu) — token SADECE
+      // "Tamamlandı"ya YENİ geçişte üretilir (mevcut token varsa korunur,
+      // aksi halde daha önce gönderilmiş bir link geçersizleşirdi).
+      if (prevStatus !== "Tamamlandı" && finalTask.status === "Tamamlandı" && !finalTask.surveyToken) {
+        finalTask = { ...finalTask, surveyToken: generateSurveyToken() };
+      }
       const tasks = state.tasks.map((t) => (t.id === form.id ? finalTask : t));
       updateState({ tasks });
     } else {
@@ -286,6 +296,14 @@ function TalepSikayet({ state, updateState, currentUser, canWrite = true }) {
   // bkz. SurveySendModal notu — herhangi bir talebe bağlı olmadan, elle
   // tetiklenen anket gönderimi. `await` edilir (otomatik bildirimlerin
   // aksine) çünkü modal sonucu (başarı/hata) doğrudan kullanıcıya gösterir.
+  // Kullanıcı teyidiyle "iş emri kapatılmıştır ile birlikte gidecek" —
+  // gerçek tıklanabilir yıldız linki (bkz. notifyByEmail "completed")
+  // SADECE bir talebe bağlı tamamlanma bildirimine eklendi. Bu buton
+  // herhangi bir talebe bağlı OLMADIĞI için (submit-survey.js bir
+  // `tasks[]` kaydı arıyor) bilinçli olarak eski e-posta-yanıtı yöntemini
+  // koruyor — sahte bir "taşıyıcı" talep kaydı oluşturmak KPI/Raporlar
+  // gibi state.tasks üzerinden sayım yapan (archived filtrelemeyen)
+  // ekranları kirletirdi.
   async function sendSurvey(toEmail, companyName, note) {
     await sendEmail({
       to: toEmail,
