@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkles, ShieldCheck, AlertTriangle } from "lucide-react";
+import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkles, ShieldCheck, AlertTriangle, MapPin, Check, ChevronRight, CircleSlash } from "lucide-react";
 import { getLocations, runFor, hasNonConformity, resolveMeters, buildMahalFillPatch, startMahalRun, NonConformityPanel, FillModal } from "../../pages/MahalKontrol.jsx";
 import { AiChecklistChat } from "../checklist/AiChecklistChat.jsx";
 import { validateReading, latestReading } from "../../lib/meterValidation.js";
@@ -17,6 +17,18 @@ const DEPT_ICON = { Teknik: Wrench, Temizlik: Sparkles, Güvenlik: ShieldCheck }
 const DUE_COLOR = "#3FB37F"; // t.ok ile aynı — kontrol bekliyor, "gidilebilir"
 const NOT_DUE_COLOR = "#C0504D"; // Günlük'te: bu dönem zaten tamamlandı
 const NOT_YET_COLOR = "#3B7FC9"; // Haftalık/Aylık'ta: kontrol günü henüz gelmedi
+
+// Kullanıcı teyidiyle: "bu açılır pencereyi daha creatif yapamazmısın göze
+// hitap eden ve seçimi kolaylaştıran, altta çıkmasın ekranı ortalasın" —
+// roomPicker (kat kutusundan "hangi mahal/ekipman/konum?" seçimi) alt-sayfa
+// yerine ortalanmış kart, her satır durum rengiyle kodlanmış bir rozet+ikon
+// taşıyor (bkz. aşağıdaki STATUS_META).
+const STATUS_META = {
+  pending: { icon: ChevronRight, bg: "#F7EEDC", fg: "#C08A2E", label: "Bekliyor" },
+  done: { icon: Check, bg: "#E4F3E1", fg: "#4E8A46", label: "Tamamlandı" },
+  off: { icon: CircleSlash, bg: "#ECEAE1", fg: "#6E7671", label: "Kapalı" },
+  nonconforming: { icon: AlertTriangle, bg: "#FBE4DF", fg: "#DC5A34", label: "Uygunsuzluk" },
+};
 
 // Kullanıcı teyidiyle: "haftalık ve aylıkta kontrol günü gelince yeşil olsun
 // gün gelmeden mavi olsun yanıp sönmesine gerek yok" — Günlük'ün aksine
@@ -438,7 +450,15 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
     // taraması istisna). Her kalemin bir `loc`'u varsa (ör. mtd3/mtd4'ün
     // ekipman grupları) "hangi ekipman?" — aksi halde (bağımsız noktalar
     // karışıksa) eski "hangi mahal?" korunuyor.
-    const title = periodItems.length > 0 && periodItems.every((it) => it.loc) ? "hangi ekipman?" : "hangi mahal?";
+    // Persona testi sırasında bulunan hata: yukarıdaki `.loc` varlığı tek
+    // başına "ekipman" anlamına gelmiyor — Güvenlik/Temizlik'in alan bazlı
+    // devriye konumlarının (guv_tur vb.) da hepsinde `.loc` var ama bunlar
+    // gerçek bir Varlık'a (assetId) bağlı DEĞİL, bu yüzden "hangi ekipman?"
+    // yanlış oluyordu (bkz. AiChecklistChat.jsx itemNoun — AYNI ayrım,
+    // gerçek assetId eşleşmesi). Burada da aynı kontrol kullanılıyor.
+    const allHaveLoc = periodItems.length > 0 && periodItems.every((it) => it.loc);
+    const allHaveAsset = allHaveLoc && periodItems.every((it) => (state.assets || []).some((a) => a.id === (it.loc?.assetId || it.point.assetId)));
+    const title = allHaveAsset ? "hangi ekipman?" : allHaveLoc ? "hangi konum?" : "hangi mahal?";
     setRoomPicker({ group, mode: "kontrol", items: periodItems, periodLabel: period, title });
   }
   function submitFill(payload) {
@@ -562,70 +582,103 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
         })
       )}
 
-      {roomPicker && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 55, display: "flex", alignItems: "flex-end" }} role="dialog" aria-modal="true" aria-label="Hangi mahal?">
-          <div style={{ position: "absolute", inset: 0, background: "rgba(20,49,40,0.45)" }} onClick={() => setRoomPicker(null)} />
-          <div style={{ position: "relative", width: "100%", maxWidth: 480, margin: "0 auto", maxHeight: "70vh", overflowY: "auto", background: t.surface, borderRadius: "16px 16px 0 0", paddingBottom: "calc(12px + env(safe-area-inset-bottom))" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: `1px solid ${t.hairline}` }}>
-              <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.ink }}>{roomPicker.group.floor}{roomPicker.periodLabel ? ` · ${roomPicker.periodLabel}` : ""} — {roomPicker.title || "hangi mahal?"}</p>
-              <button onClick={() => setRoomPicker(null)} aria-label="Kapat" style={{ all: "unset", cursor: "pointer", color: t.muted, display: "flex", width: 32, height: 32, alignItems: "center", justifyContent: "center" }}><X size={20} aria-hidden="true" /></button>
-            </div>
-            {roomPicker.mode === "ariza" && (
-              <>
-                <button onClick={() => openFloorIssueAt(roomPicker.group, null)}
-                  style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", boxSizing: "border-box", minHeight: 48, padding: "12px 16px", fontSize: 14.5, color: t.muted, borderBottom: `1px solid ${t.hairline}` }}>
-                  Genel (kat geneli, belirli bir mahal değil)
-                </button>
-                {roomPicker.addressOptions.map((addr) => (
-                  <button key={addr.key} onClick={() => openFloorIssueAt(roomPicker.group, addr)}
-                    style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", boxSizing: "border-box", minHeight: 48, padding: "12px 16px", fontSize: 14.5, color: t.ink, borderBottom: `1px solid ${t.hairline}` }}>
-                    {addr.label}
-                  </button>
-                ))}
-              </>
-            )}
-            {roomPicker.mode === "kontrol" && (roomPicker.items || roomPicker.group.items).map((c) => (
-              <div key={c.key} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${t.hairline}` }}>
-                <button
-                  onClick={() => {
-                    // Kullanıcı teyidiyle: "teknik'te yaptığımız soru cevap
-                    // sistemini diğer departmanlarda da yap, sistem kompleks
-                    // olsun" — bu artık sadece mtd3/mtd4 gibi ekipman
-                    // gruplarıyla sınırlı değil: AI Checklist (ai_first)
-                    // açıkken, o an EKRANDA GÖRÜNEN listedeki (roomPicker,
-                    // zaten kata/döneme göre doğru şekilde daraltılmış —
-                    // ör. guv_tur'da tek katın 2 tarafı, Temizlik'te 7 alan)
-                    // AYNI noktaya (c.point) ait TÜM konumlar bir AI kuyruğu
-                    // oluşturuyor; seçilen konumdan başlayıp sırayla geziyor.
-                    // Böylece Güvenlik'in kat devriyesi (Beşiktaş→Sarıyer) ve
-                    // Temizlik'in alan turu (Lobi→WC→Otopark→...) de aynı
-                    // "tek soru sor, onayla, sonrakine geç" deneyimini alıyor.
-                    const sameLocs = (roomPicker.items || roomPicker.group.items).filter((it) => it.point.id === c.point.id).map((it) => it.loc).filter(Boolean);
-                    const isMultiLocation = sameLocs.length > 1;
-                    if (state.aiChecklistMode === "ai_first" && isMultiLocation) {
-                      setRoomPicker(null);
-                      setAiQueueTarget({ point: c.point, locations: rotateLocations(sameLocs, c.loc.key) });
-                    } else {
-                      startAndOpenFill(c.point, c.loc);
-                    }
-                  }}
-                  style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0, boxSizing: "border-box", minHeight: 48, padding: "12px 16px", fontSize: 14.5, color: t.ink, display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ flex: 1, minWidth: 0 }}>{c.label}</span>
-                  {c.status === "off" && (
-                    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: t.muted, background: t.hairline, borderRadius: 999, padding: "2px 8px" }}>Kapalı</span>
-                  )}
-                </button>
-                {c.status === "nonconforming" && (
-                  <button onClick={() => setNcTarget({ point: c.point, location: c.loc })} title="Uygunsuzluk bilgisi"
-                    style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", padding: "0 16px", height: 48, color: "#DC5A34", flexShrink: 0 }}>
-                    <AlertTriangle size={17} />
-                  </button>
-                )}
+      {roomPicker && (() => {
+        const HeaderIcon = DEPT_ICON[department] || ClipboardCheck;
+        const RowTypeIcon = roomPicker.title === "hangi ekipman?" ? Wrench : MapPin;
+        const items = roomPicker.mode === "kontrol" ? (roomPicker.items || roomPicker.group.items) : null;
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 55, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} role="dialog" aria-modal="true" aria-label="Hangi mahal?">
+            <div style={{ position: "absolute", inset: 0, background: "rgba(20,49,40,0.55)" }} onClick={() => setRoomPicker(null)} />
+            <div style={{ position: "relative", width: "100%", maxWidth: 440, maxHeight: "min(600px, 85vh)", display: "flex", flexDirection: "column", background: t.surface, borderRadius: 20, overflow: "hidden", boxShadow: "0 24px 60px rgba(20,49,40,0.4)" }}>
+              <div style={{ background: `linear-gradient(135deg, ${t.pine}, ${t.pineDeep})`, padding: "18px 18px 16px", flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    <div style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 12, background: "rgba(255,255,255,0.16)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <HeaderIcon size={19} color="#FFFFFF" aria-hidden="true" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                        {roomPicker.group.floor}{roomPicker.periodLabel ? ` · ${roomPicker.periodLabel}` : ""}
+                      </p>
+                      <p style={{ margin: "2px 0 0", fontSize: 16.5, fontWeight: 700, color: "#FFFFFF", textTransform: "capitalize" }}>{roomPicker.title || "hangi mahal?"}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setRoomPicker(null)} aria-label="Kapat" style={{ all: "unset", cursor: "pointer", flexShrink: 0, color: "#FFFFFF", display: "flex", width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(255,255,255,0.14)" }}><X size={17} aria-hidden="true" /></button>
+                </div>
               </div>
-            ))}
+              <div style={{ overflowY: "auto", padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {roomPicker.mode === "ariza" && (
+                  <>
+                    <button onClick={() => openFloorIssueAt(roomPicker.group, null)}
+                      style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", minHeight: 52, padding: "10px 12px", borderRadius: 14, background: t.ivory }}>
+                      <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 10, background: t.hairline, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <AlertTriangle size={16} color={t.muted} aria-hidden="true" />
+                      </div>
+                      <span style={{ fontSize: 14, color: t.muted, fontWeight: 500 }}>Genel (kat geneli, belirli bir mahal değil)</span>
+                    </button>
+                    {roomPicker.addressOptions.map((addr) => (
+                      <button key={addr.key} onClick={() => openFloorIssueAt(roomPicker.group, addr)}
+                        style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", minHeight: 52, padding: "10px 12px", borderRadius: 14, background: t.ivory }}>
+                        <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 10, background: t.pineSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <MapPin size={16} color={t.pine} aria-hidden="true" />
+                        </div>
+                        <span style={{ fontSize: 14.5, color: t.ink, fontWeight: 600, flex: 1, minWidth: 0 }}>{addr.label}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+                {items && items.map((c) => {
+                  const meta = STATUS_META[c.status] || STATUS_META.pending;
+                  const StatusIcon = meta.icon;
+                  return (
+                    <div key={c.key} style={{ display: "flex", alignItems: "stretch", gap: 6, borderRadius: 14, background: t.ivory }}>
+                      <button
+                        onClick={() => {
+                          // Kullanıcı teyidiyle: "teknik'te yaptığımız soru cevap
+                          // sistemini diğer departmanlarda da yap, sistem kompleks
+                          // olsun" — bu artık sadece mtd3/mtd4 gibi ekipman
+                          // gruplarıyla sınırlı değil: AI Checklist (ai_first)
+                          // açıkken, o an EKRANDA GÖRÜNEN listedeki (roomPicker,
+                          // zaten kata/döneme göre doğru şekilde daraltılmış —
+                          // ör. guv_tur'da tek katın 2 tarafı, Temizlik'te 7 alan)
+                          // AYNI noktaya (c.point) ait TÜM konumlar bir AI kuyruğu
+                          // oluşturuyor; seçilen konumdan başlayıp sırayla geziyor.
+                          // Böylece Güvenlik'in kat devriyesi (Beşiktaş→Sarıyer) ve
+                          // Temizlik'in alan turu (Lobi→WC→Otopark→...) de aynı
+                          // "tek soru sor, onayla, sonrakine geç" deneyimini alıyor.
+                          const sameLocs = items.filter((it) => it.point.id === c.point.id).map((it) => it.loc).filter(Boolean);
+                          const isMultiLocation = sameLocs.length > 1;
+                          if (state.aiChecklistMode === "ai_first" && isMultiLocation) {
+                            setRoomPicker(null);
+                            setAiQueueTarget({ point: c.point, locations: rotateLocations(sameLocs, c.loc.key) });
+                          } else {
+                            startAndOpenFill(c.point, c.loc);
+                          }
+                        }}
+                        style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0, boxSizing: "border-box", minHeight: 52, padding: "9px 10px", display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 10, background: meta.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {c.status === "pending" ? <RowTypeIcon size={16} color={meta.fg} aria-hidden="true" /> : <StatusIcon size={16} color={meta.fg} aria-hidden="true" />}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: 14.5, fontWeight: 600, color: t.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</p>
+                          <p style={{ margin: "1px 0 0", fontSize: 11, fontWeight: 600, color: meta.fg }}>{meta.label}</p>
+                        </div>
+                        <ChevronRight size={16} color={t.muted} aria-hidden="true" style={{ flexShrink: 0 }} />
+                      </button>
+                      {c.status === "nonconforming" && (
+                        <button onClick={() => setNcTarget({ point: c.point, location: c.loc })} title="Uygunsuzluk bilgisi"
+                          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", padding: "0 12px", color: "#DC5A34", flexShrink: 0 }}>
+                          <AlertTriangle size={17} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {fillTarget && (
         <FillModal
