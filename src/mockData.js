@@ -989,23 +989,92 @@ const TEMIZLIK_OFIS_KATLARI_LOCATIONS = Array.from({ length: 20 }, (_, i) => Str
 // (Trafo/OG Pano Odası — Beşiktaş; Kazan Dairesi/Soğutma Odası — Sarıyer)
 // eşleştiği için ayrı, genişletilmiş soru seti alır (kullanıcı teyidiyle:
 // "katlardaki mahllaeride kontrol ediyorlar özellikle 3.Bodrum kat").
+// Kullanıcı teyidiyle: "güvenlik katlarda yangın merdivenlerini kontrol
+// ediyor kat holünü kontrol ediyor... acil kaçış aydınlatması çalışıyor mu
+// katlarda aydınlatma da problem var mı ofis kapıları kitli mi gibi...
+// karşı cevaplarıda hazırla" — Temizlik listesindeki AYNI desen
+// (action/severity/photoRequired, bkz. lib/offlineGuidance.js
+// resolveGuidance) Güvenlik'in devriye sorularına da uygulandı.
 const KAT_DEVRIYE_SORULARI = [
-  { text: "Ofis kapıları kilitli/kapalı mı?", failOn: "Hayır" },
-  { text: "Kat holü/ortak alan düzenli ve engelsiz mi?", failOn: "Hayır" },
-  { text: "Şüpheli kişi/durum var mı?", failOn: "Evet" },
+  { text: "Ofis kapıları kilitli/kapalı mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kilitli olmayan ofisi hemen ilgili firmaya/vardiya amirine bildir, mümkünse kapıyı kapat ve alanı gözlemde tut. Tekrarlanan durumlarda firma yönetimine yazılı uyarı için tesis yöneticisine bilgi ver." },
+  { text: "Kat holü / ortak alan düzenli ve engelsiz mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Engel teşkil eden malzemeyi kaldırt veya sorumlu firmaya bildir; kaçış yolu daralmışsa acil olarak işaretle ve tesis yönetimine bilgi ver." },
+  { text: "Yangın merdiveni kapısı ve kaçış yolu açık, önü boş mu?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Merdiven önündeki malzemeyi derhal kaldırt/kaldır. Kaçış yolu işgali can güvenliği ihlalidir — fotoğrafla, İSG sorumlusuna ve tesis yöneticisine aynı gün bildir." },
+  { text: "Acil kaçış / yönlendirme aydınlatması çalışıyor mu?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Arızalı armatürü not et, teknik bakıma acil iş emri aç. Bu bir yasal/güvenlik gereksinimidir, ertelenmez." },
+  { text: "Kat genel aydınlatması yeterli mi, sönük/yanmayan armatür var mı?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Yanmayan armatürü not et, teknik bakıma iş emri aç. Karanlık bölge oluşuyorsa geçici olarak devriye sıklığını artır." },
+  { text: "Şüpheli kişi/durum var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Durumu derhal vardiya amirine bildir, mümkünse kişiyi güvenli mesafeden gözlem altında tut, doğrudan müdahale etme. Gerekiyorsa kolluk kuvvetlerini ara ve olay tutanağı düzenle." },
 ];
 const OTOPARK_DEVRIYE_SORULARI = [
-  { text: "Aydınlatma yeterli mi?", failOn: "Hayır" },
-  { text: "Teknik oda kapıları kilitli mi?", failOn: "Hayır" },
-  { text: "Şüpheli kişi/araç var mı?", failOn: "Evet" },
+  { text: "Aydınlatma yeterli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Yanmayan armatürü not et, teknik bakıma iş emri aç. Karanlık bölgede geçici olarak devriye sıklığını artır." },
+  { text: "Teknik oda kapıları kilitli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kapıyı kontrol edip kilitle/kilitlet, teknik ekibe bilgi ver. Yetkisiz erişim güvenlik riski taşır." },
+  { text: "Şüpheli kişi/araç var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Durumu derhal vardiya amirine bildir, aracın plakasını/kişinin eşkalini not et. Gerekiyorsa kolluk kuvvetlerini ara ve olay tutanağı düzenle." },
 ];
-const OTOPARK_3B_BESIKTAS_SORULARI = [
-  ...OTOPARK_DEVRIYE_SORULARI,
-  { text: "Trafo / OG Pano Odası kapısı kilitli mi?", failOn: "Hayır" },
+// Kullanıcı teyidiyle: "3b kat... burda ısıma odası ve soğutma odası var
+// bunlarında kontrol etsin olumsuz durum sorularını sorsun burda santral
+// odaları var olumsuz durum kablo koususu var mı gibi sorular olsun" — bu
+// TEKNİK'in kendi DETAYLI ekipman kontrolünün (mtd3/mtd4) yerine GEÇMEZ;
+// güvenliğin devriye sırasında yapacağı basit, teknik bilgi gerektirmeyen
+// bir GÖRSEL/DUYUSAL anomali taraması (koku/ses/duman/kilit) — Trafo/OG
+// Pano Odası (Beşiktaş) ile Kazan Dairesi/Soğutma Odası (Sarıyer) İKİSİ
+// için de AYNI soru seti (santral/pano odaları da aynı fiziksel koridorda).
+const TEKNIK_ODA_GUVENLIK_SORULARI = [
+  { text: "Oda kapısı kilitli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kapıyı kontrol edip kilitle/kilitlet, teknik ekibe bilgi ver. Yetkisiz erişim güvenlik riski taşır." },
+  { text: "Kablo yanığı/erimiş plastik kokusu var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Alanı derhal boşalt, elektrik anahtarına/prize dokunma. Teknik bakım ekibini ve vardiya amirini ACİL olarak ara, gerekiyorsa yangın ekibini bilgilendir." },
+  { text: "Anormal ses (uğultu, çıtırtı, kıvılcım) var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Alandan uzaklaş, kaynak ekipmana dokunma. Teknik bakım ekibini derhal ara, bu maddeyi acil olarak işaretle." },
+  { text: "Duman/is belirtisi var mı?", failOn: "Evet", severity: "acil", photoRequired: true,
+    action: "Alanı derhal boşalt ve yangın alarm prosedürünü başlat. İtfaiyeyi ve teknik bakım ekibini ara, mümkünse fotoğrafla." },
+  { text: "Oda önü / kaçış yolu boş, tahliyeye engel yok mu?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Önündeki malzemeyi kaldırt, tesis yöneticisine bilgi ver." },
 ];
-const OTOPARK_3B_SARIYER_SORULARI = [
-  ...OTOPARK_DEVRIYE_SORULARI,
-  { text: "Kazan Dairesi / Soğutma Odası kapıları kilitli mi?", failOn: "Hayır" },
+const OTOPARK_3B_BESIKTAS_SORULARI = [...OTOPARK_DEVRIYE_SORULARI, ...TEKNIK_ODA_GUVENLIK_SORULARI];
+const OTOPARK_3B_SARIYER_SORULARI = [...OTOPARK_DEVRIYE_SORULARI, ...TEKNIK_ODA_GUVENLIK_SORULARI];
+// Kullanıcı teyidiyle: "6b kat otopark burda atık su odası var burayı
+// kontrol etsin."
+const ATIK_SU_ODASI_GUVENLIK_SORULARI = [
+  { text: "Atık su odası kapısı kilitli mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kapıyı kontrol edip kilitle/kilitlet, teknik ekibe bilgi ver." },
+  { text: "Taşma/su birikintisi var mı?", failOn: "Evet", severity: "acil", photoRequired: true,
+    action: "Alanı fotoğrafla, teknik bakıma ACİL iş emri aç — taşma alt katlara sızıntı riski taşır. Yakında elektrik panosu varsa dikkatli yaklaş." },
+  { text: "Kötü koku/kanalizasyon kokusu var mı?", failOn: "Evet", severity: "takip", photoRequired: false,
+    action: "Havalandırmayı kontrol et, teknik bakıma bildir. Koku yoğunsa alanda uzun süre bulunma." },
+];
+// Kullanıcı teyidiyle: "1b katta yönetim ofisi var yönetim ofisi ile
+// ilgili sorular sor." — genel kat devriyesine (1B zaten KAT_FLOOR_LABELS
+// içinde, standart soruları alıyor) EK, tek bir özel konum.
+const YONETIM_OFISI_GUVENLIK_SORULARI = [
+  { text: "Yönetim ofisi giriş kapısı kilitli mi (mesai dışında)?", failOn: "Hayır", severity: "acil", photoRequired: false,
+    action: "Kapıyı derhal kilitle, mesai içindeyse durumu yönetime bildir. Mesai dışı açık kapı hırsızlık riski taşır — vardiya amirine bilgi ver." },
+  { text: "Ofis ışıkları/elektronik cihazlar kapatılmış mı (mesai sonrası)?", failOn: "Hayır", severity: "bilgi", photoRequired: false,
+    action: "Açık bırakılan cihaz/ışığı kapat, ertesi gün ilgili personele bilgilendirme yap." },
+  { text: "Ofis çevresinde şüpheli kişi/durum var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Durumu derhal vardiya amirine bildir, gerekiyorsa kolluk kuvvetlerini ara ve olay tutanağı düzenle." },
+];
+// Kullanıcı teyidiyle: "burda teras katı var teras katı içinde sorular
+// koy" — 20. Kat Terası, genel kat devriyesine (20. Kat zaten kendi
+// Beşiktaş/Sarıyer standart sorularını alıyor) EK, tek bir özel konum
+// (Temizlik'in teras20'siyle AYNI floorLabel).
+const TERAS_GUVENLIK_SORULARI = [
+  { text: "Teras çıkış kapısı kilitli/kontrollü mü?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Kapıyı kontrol edip kilitle, arızalıysa teknik bakıma bildir. Kontrolsüz erişim düşme riski taşır." },
+  { text: "Korkuluk ve güvenlik bariyerleri sağlam, gevşek/hasarlı değil mi?", failOn: "Hayır", severity: "acil", photoRequired: true,
+    action: "Alanı derhal bant/koni ile işaretle, erişimi kısıtla. Fotoğrafla, teknik bakıma acil onarım talebi aç — düşme riski yüksektir." },
+  { text: "Teras aydınlatması çalışıyor mu?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Arızalı armatürü not et, teknik bakıma iş emri aç. Gece devriyesinde el feneri kullan." },
+  { text: "Yangın söndürme cihazı (varsa) yerinde ve erişilebilir mi?", failOn: "Hayır", severity: "takip", photoRequired: false,
+    action: "Cihazın yerini/durumunu kontrol et, eksikse teknik bakım/İSG sorumlusuna bildir." },
+  { text: "Şüpheli kişi/durum var mı?", failOn: "Evet", severity: "acil", photoRequired: false,
+    action: "Durumu derhal vardiya amirine bildir, mümkünse kişiyi güvenli mesafeden gözlem altında tut. Gerekiyorsa kolluk kuvvetlerini ara ve olay tutanağı düzenle." },
 ];
 const DEFAULT_GUVENLIK_SHIFTS = [
   { id: "gunduz", label: "Gündüz Vardiyası", start: "14:00", end: "18:00" },
@@ -1021,7 +1090,12 @@ function genGuvenlikTurLocations() {
       questions: label === "3B" ? (side === "Beşiktaş" ? OTOPARK_3B_BESIKTAS_SORULARI : OTOPARK_3B_SARIYER_SORULARI) : OTOPARK_DEVRIYE_SORULARI,
     }))
   ));
-  return [...katItems, ...otoparkItems];
+  const ekMintikalar = [
+    { key: "1B_yonetim_ofisi", label: "1. Bodrum Kat — Yönetim Ofisi", floorLabel: "1B", room: "Yönetim Ofisi", questions: YONETIM_OFISI_GUVENLIK_SORULARI },
+    { key: "20_teras", label: "20. Kat Terası", floorLabel: "20", room: "Teras", questions: TERAS_GUVENLIK_SORULARI },
+    { key: "6B_atik_su_odasi", label: "6. Bodrum Kat — Atık Su Odası", floorLabel: "6B", room: "Atık Su Odası", questions: ATIK_SU_ODASI_GUVENLIK_SORULARI },
+  ];
+  return [...katItems, ...otoparkItems, ...ekMintikalar];
 }
 
 // Kullanıcı teyidiyle: "Teknikteki mahal kontrol sorularına panolarıda ekle
@@ -1617,6 +1691,23 @@ export function migrateLegacyState(state) {
     if (freshTemizlik && idx !== -1 && !(next.mahalPoints[idx].locations || []).some((l) => l.key === "ofis_kat_1")) {
       const points = [...next.mahalPoints];
       points[idx] = { ...points[idx], locations: freshTemizlik.locations, perFloor: freshTemizlik.perFloor, groupByFloor: freshTemizlik.groupByFloor, assetDesc: freshTemizlik.assetDesc };
+      next = { ...next, mahalPoints: points };
+    }
+  }
+  // Kullanıcı teyidiyle: "güvenlik... yangın merdivenlerini kontrol
+  // ediyor... acil kaçış aydınlatması... 1b katta yönetim ofisi... 3b
+  // kat... ısıma odası ve soğutma odası... 6b kat... atık su odası..." —
+  // guv_tur'un soru/konum listesi de mtd_temizlik ile AYNI desende
+  // zenginleştirildi (bkz. KAT_DEVRIYE_SORULARI/TEKNIK_ODA_GUVENLIK_
+  // SORULARI/YONETIM_OFISI_GUVENLIK_SORULARI/TERAS_GUVENLIK_SORULARI/
+  // ATIK_SU_ODASI_GUVENLIK_SORULARI). Persist edilmiş ESKİ kayıtta hâlâ
+  // yeni "20_teras" konumu YOKSA (idempotent) güncel haliyle değiştirilir.
+  if (Array.isArray(next.mahalPoints)) {
+    const freshGuvTur = MAHAL_POINTS.find((p) => p.id === "guv_tur");
+    const idx = next.mahalPoints.findIndex((p) => p.id === "guv_tur");
+    if (freshGuvTur && idx !== -1 && !(next.mahalPoints[idx].locations || []).some((l) => l.key === "20_teras")) {
+      const points = [...next.mahalPoints];
+      points[idx] = { ...points[idx], locations: freshGuvTur.locations, questions: freshGuvTur.questions };
       next = { ...next, mahalPoints: points };
     }
   }
