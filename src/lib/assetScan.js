@@ -25,12 +25,21 @@ export function resolveAssetScan(state, assetId) {
   if (!assetId) return null;
   const asset = (state.assets || []).find((a) => a.id === assetId && !a.archived);
   if (!asset) return null;
+  // Kullanıcı teyidiyle bulunan hata (QA turu): mtd3/mtd4 gibi ekipman-bazlı
+  // gruplu noktalarda `assetIds` alanı odadaki TÜM ekipmanları içeriyor (bkz.
+  // yukarıdaki not), bu yüzden `||` sırası eskiden `assetIds` eşleşmesini
+  // `locations` eşleşmesinden ÖNCE kontrol ediyordu — Kazan 2'nin QR'ı bile
+  // ilk koşulda (assetIds.includes) "true" dönüp `matchedLocationKey`'i hiç
+  // hesaplamadan noktayı buluyordu, yani HER ekipman QR'ı odanın genel
+  // "hangi ekipman?" seçimine düşüyordu (asıl istenen: doğrudan o ekipmana
+  // gitmek). Artık ÖNCE (daha spesifik olan) `locations` içinde aranıyor,
+  // sadece hiçbiri eşleşmezse (ör. Genel gibi assetId'siz konumlar veya eski
+  // assetIds-only noktalar) oda-seviyesi `assetId`/`assetIds`'e düşülüyor.
   let matchedLocationKey = null;
   const point = (state.mahalPoints || []).find((p) => {
-    if (p.assetId === asset.id || (p.assetIds || []).includes(asset.id)) return true;
     const loc = (p.locations || []).find((l) => l.assetId === asset.id);
     if (loc) { matchedLocationKey = loc.key; return true; }
-    return false;
+    return p.assetId === asset.id || (p.assetIds || []).includes(asset.id);
   });
   return {
     assetId: asset.id,

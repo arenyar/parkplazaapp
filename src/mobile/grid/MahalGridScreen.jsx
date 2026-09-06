@@ -407,7 +407,16 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
       startAndOpenFill(only.point, only.loc);
       return;
     }
-    setRoomPicker({ group, mode: "kontrol", items: periodItems, periodLabel: period });
+    // Kullanıcı teyidiyle bulunan eksik (QA turu): kat kutusundan ("Günlük
+    // Kontrol" vb.) açılan bu seçim sheet'i eskiden HER ZAMAN sabit "hangi
+    // mahal?" başlığıyla açılıyordu — QR akışındaki (yukarıdaki focusPointId
+    // effect'i) "hangi ekipman?"/"hangi konum?" ayrımı buraya hiç
+    // yansımıyordu, ama kattaki günlük asıl kullanım YOLU zaten bu (QR
+    // taraması istisna). Her kalemin bir `loc`'u varsa (ör. mtd3/mtd4'ün
+    // ekipman grupları) "hangi ekipman?" — aksi halde (bağımsız noktalar
+    // karışıksa) eski "hangi mahal?" korunuyor.
+    const title = periodItems.length > 0 && periodItems.every((it) => it.loc) ? "hangi ekipman?" : "hangi mahal?";
+    setRoomPicker({ group, mode: "kontrol", items: periodItems, periodLabel: period, title });
   }
   function submitFill(payload) {
     const { point, location, source } = fillTarget;

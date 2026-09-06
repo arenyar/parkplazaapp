@@ -15,7 +15,6 @@ import { KISISEL_ITEMS, ARACLAR_ITEMS, DAHAFAZLA_ITEMS, OPERASYONLAR_SCOPES, com
 import { enqueueDraft, removeDraft, getDrafts, subscribeDrafts } from "./mobile/offline/draftQueue.js";
 import { TaslaklarScreen } from "./mobile/offline/TaslaklarScreen.jsx";
 import { TaskListScreen } from "./mobile/list/TaskListScreen.jsx";
-import { MahalGridScreen } from "./mobile/grid/MahalGridScreen.jsx";
 import { PersonnelScreen } from "./mobile/personnel/PersonnelScreen.jsx";
 import { SuggestionsScreen } from "./mobile/suggestions/SuggestionsScreen.jsx";
 import { ProfileScreen } from "./mobile/profile/ProfileScreen.jsx";
@@ -23,6 +22,7 @@ import { Dashboard } from "./pages/Dashboard.jsx";
 import { Teknik } from "./pages/Teknik.jsx";
 import { Kontroller } from "./pages/Kontroller.jsx";
 import { Guvenlik } from "./pages/Guvenlik.jsx";
+import { Temizlik } from "./pages/Temizlik.jsx";
 import { Dokumanlar } from "./pages/Dokumanlar.jsx";
 import { Raporlar } from "./pages/Raporlar.jsx";
 import { Duyurular } from "./pages/Duyurular.jsx";
@@ -111,12 +111,16 @@ function renderScreen(screenKey, p) {
     case "bakim": return <Teknik key={p.activeNavKey} state={p.state} updateState={p.updateState} currentUser={p.currentUserName} currentUserObj={p.currentUser} role={p.role} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("bakim")} mobileMode />;
     case "kontroller": return <Kontroller state={p.state} updateState={p.updateState} currentUser={p.currentUserName} canWrite={p.canWrite("kontroller")} />;
     case "guvenlik": return <Guvenlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("guvenlik")} mobileMode />;
-    case "temizlik": return (
-      <MahalGridScreen
-        state={p.state} updateState={p.updateState} currentUserName={p.currentUserName}
-        department="Temizlik" canWrite={p.canWrite("temizlik")}
-      />
-    );
+    // Kullanıcı teyidiyle (QA turu): bu dal daha önce Temizlik.jsx'i HİÇ
+    // mount ETMEDEN doğrudan MahalGridScreen'i render ediyordu —
+    // bakim/guvenlik'in aksine `deepLink`/`onConsumeDeepLink` hiç
+    // geçirilmiyordu, bu yüzden bir mahal/ekipman QR'ı okutulunca Temizlik
+    // ekranına geçiliyor ama hiçbir nokta/konum odaklanmıyordu (QR etiketi
+    // fiilen işlevsizdi). Artık bakim/guvenlik ile AYNI desen: Temizlik.jsx
+    // kendi içinde (mobileMode true iken, kendi MahalKontrol.jsx render'ına
+    // focusPointId/focusLocationKey'i deepLink olarak ilettiği mantıkla)
+    // doğru şekilde mount ediliyor (bkz. Temizlik.jsx).
+    case "temizlik": return <Temizlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("temizlik")} mobileMode />;
     case "dokumanlar": return <Dokumanlar state={p.state} />;
     case "raporlar": return <Raporlar state={p.state} />;
     case "ayarlar": return <Ayarlar state={p.state} updateState={p.updateState} canWrite={p.canWrite("ayarlar")} currentUser={p.currentUser} />;
