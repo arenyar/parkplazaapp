@@ -3,6 +3,7 @@ import { TaskForm, emptyTask } from "../../components/TaskForm.jsx";
 import { ListScreen } from "./ListScreen.jsx";
 import { DetailScreen } from "../detail/DetailScreen.jsx";
 import { OPERASYONLAR_SCOPES } from "../nav/navConfig.js";
+import { openTasksByCategory } from "../personnel/personStats.js";
 import { deptColor } from "../../theme.js";
 import { mobileTokens as t } from "../tokens.js";
 import { stampStatusTiming } from "../../lib/taskTiming.js";
@@ -26,16 +27,34 @@ import { consumeStockPatch } from "../../lib/stock.js";
 // YOK artık; iki sekme AÇMA/KAPAMA (toggle) — aktif olana tekrar basmak
 // filtreyi kaldırıp örtük "tümü" haline (activeScopeKey="operasyonlar")
 // döner. "Kiracıda departman bazlı göster" — bkz. aşağıdaki KIRACI_GROUP_BY.
-const SCOPE_TABS = [
-  { key: "kiracitalepleri", label: "Talep Şikayetleri" },
-];
+// Kullanıcı teyidiyle: "ana sayfadaki işlerim ekranına girdiğimde tüm
+// kayıtlar geliyor burda otomatik olarak bana atanan işler filtreli
+// gelmeli. havuzda bekleyen işler içinde önce liste açılmalı ordan iş
+// seçip işi başlatmalı" — bu ekran alt gezinmedeki "İşler" butonunun
+// gerçek karşılığı; gerçek bir personel kaydına bağlı hesaplarda
+// (currentUser var) artık varsayılan sekme "İşlerim" (Dashboard'daki AYNI
+// kategori, bkz. personStats.js openTasksByCategory — tek kaynak, iki
+// ekran arasında sapma olmasın diye) ve "Havuzda Bekleyen İşler" ayrı bir
+// sekme; seçilen kayıt bu ekranın zaten var olan Liste → Detay (İşi
+// Başlat/Bitir sticky action, bkz. DetailScreen) akışına düşüyor —
+// ayrıca kurulacak bir şey yok. currentUser yoksa (ör. Yönetim'in
+// personel kaydına bağlı olmayan hesabı) eski "Talep yönetimi" (tüm
+// kayıtlar) varsayılanı KORUNUR — atanan/havuz kavramı bir kişiye bağlı,
+// şirket geneli izleyen bir hesap için anlamsız.
+function buildScopeTabs(hasPerson) {
+  return hasPerson
+    ? [{ key: "assigned", label: "İşlerim" }, { key: "pool", label: "Havuzda Bekleyen İşler" }, { key: "kiracitalepleri", label: "Talep Şikayetleri" }]
+    : [{ key: "kiracitalepleri", label: "Talep Şikayetleri" }];
+}
 
-export function TaskListScreen({ state, updateState, currentUserName, scope, pendingAction, onConsumePending, canWrite = true }) {
+export function TaskListScreen({ state, updateState, currentUserName, currentUser, scope, pendingAction, onConsumePending, canWrite = true }) {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
   const [detailTask, setDetailTask] = useState(null);
-  const [activeScopeKey, setActiveScopeKey] = useState("operasyonlar");
-  const activeScope = OPERASYONLAR_SCOPES[activeScopeKey] || scope;
+  const [activeScopeKey, setActiveScopeKey] = useState(currentUser ? "assigned" : "operasyonlar");
+  const scopeTabs = buildScopeTabs(!!currentUser);
+  const taskCategories = currentUser ? openTasksByCategory(state.tasks, currentUser) : null;
+  const defaultScopeKey = currentUser ? "assigned" : "operasyonlar";
 
   useEffect(() => {
     if (!pendingAction) return;
@@ -99,7 +118,14 @@ export function TaskListScreen({ state, updateState, currentUserName, scope, pen
     setFormOpen(true);
   }
 
-  const scopedTasks = activeScope.filter ? state.tasks.filter(activeScope.filter) : state.tasks;
+  let scopedTasks, screenTitle;
+  if (activeScopeKey === "assigned" && taskCategories) { scopedTasks = taskCategories.assigned; screenTitle = "İşlerim"; }
+  else if (activeScopeKey === "pool" && taskCategories) { scopedTasks = taskCategories.pool; screenTitle = "Havuzda Bekleyen İşler"; }
+  else {
+    const fallbackScope = OPERASYONLAR_SCOPES[activeScopeKey] || scope;
+    scopedTasks = fallbackScope.filter ? state.tasks.filter(fallbackScope.filter) : state.tasks;
+    screenTitle = fallbackScope.title;
+  }
 
   if (formOpen && canWrite) {
     return (
@@ -139,10 +165,10 @@ export function TaskListScreen({ state, updateState, currentUserName, scope, pen
   return (
     <div>
       <div style={{ display: "flex", gap: 6, padding: "12px 16px 4px" }}>
-        {SCOPE_TABS.map((tb) => {
+        {scopeTabs.map((tb) => {
           const isActive = activeScopeKey === tb.key;
           return (
-            <button key={tb.key} onClick={() => setActiveScopeKey(isActive ? "operasyonlar" : tb.key)}
+            <button key={tb.key} onClick={() => setActiveScopeKey(isActive ? defaultScopeKey : tb.key)}
               style={{ flex: 1, border: "none", borderRadius: 999, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 36,
                 background: isActive ? t.pine : t.surface, color: isActive ? "#fff" : t.muted }}>
               {tb.label}
@@ -150,7 +176,7 @@ export function TaskListScreen({ state, updateState, currentUserName, scope, pen
           );
         })}
       </div>
-      <ListScreen title={activeScope.title} tasks={scopedTasks} currentUserName={currentUserName} onOpenTask={setDetailTask} team={state.team}
+      <ListScreen title={screenTitle} tasks={scopedTasks} currentUserName={currentUserName} onOpenTask={setDetailTask} team={state.team}
         groupBy={activeScopeKey === "kiracitalepleri" ? kiraciGroupBy : undefined} />
     </div>
   );

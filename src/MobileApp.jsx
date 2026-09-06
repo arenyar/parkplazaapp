@@ -93,7 +93,7 @@ function renderScreen(screenKey, p) {
       onShortcut={p.goToDeptShortcut} onOpenPerson={p.goToPerson} onOpenTicket={p.openTicket} />;
     case "operasyonlar": return (
       <TaskListScreen
-        state={p.state} updateState={p.updateState} currentUserName={p.currentUserName}
+        state={p.state} updateState={p.updateState} currentUserName={p.currentUserName} currentUser={p.currentUser}
         scope={OPERASYONLAR_SCOPES[p.activeNavKey] || OPERASYONLAR_SCOPES.operasyonlar}
         pendingAction={p.pendingTaskAction} onConsumePending={p.onConsumePending} canWrite={p.canWrite("operasyonlar")}
       />
