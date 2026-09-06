@@ -355,10 +355,10 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
     const point = points.find((p) => p.id === focusPointId);
     if (point) {
       if (!point.perFloor) {
-        startAndOpenFill(point, null, "qr");
+        startAndOpenFillOrAi(point, null, "qr");
       } else if (focusLocationKey) {
         const loc = (point.locations || []).find((l) => l.key === focusLocationKey);
-        if (loc) startAndOpenFill(point, loc, "qr");
+        if (loc) startAndOpenFillOrAi(point, loc, "qr");
       } else {
         // guv_tur gibi katı-bazlı (deriveLocations/floorLabel'lı) noktalarda
         // fiziksel QR etiketi belirli bir kata özel (`?mahal=...&floor=3B`)
@@ -370,7 +370,7 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
         const allLocs = getLocations(point, state);
         const locs = focusFloorLabel ? allLocs.filter((l) => l.floorLabel == null || l.floorLabel === focusFloorLabel) : allLocs;
         if (locs.length === 1) {
-          startAndOpenFill(point, locs[0], "qr");
+          startAndOpenFillOrAi(point, locs[0], "qr");
         } else if (locs.length > 1) {
           const items = locs.map((loc) => {
             const nonconforming = hasNonConformity(point, state, loc.key);
@@ -428,6 +428,24 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
     updateState(startMahalRun(state, point, location, currentUserName));
     setFillTarget({ point, location, source });
   }
+  // Kullanıcı teyidiyle (ekran görüntüsüyle bulunan tutarsızlık): "neden
+  // farklı tüm kontrollerin aynı olmasını istemiştim... ayarlardan ai
+  // checklist'i kapalı yaparsam eski sisteme geçsin" — AI kuyruğu daha
+  // önce SADECE birden fazla konumu olan noktalarda (isMultiLocation)
+  // tetikleniyordu; tek-konumlu noktalar (ör. "Teras Ortak Alan") Ayarlar
+  // > AI Checklist anahtarından TAMAMEN BAĞIMSIZ olarak hep klasik forma
+  // düşüyordu. Artık TEK karar noktası state.aiChecklistMode: açıksa HER
+  // zaman AI (tek konumlu noktalarda tek elemanlı bir kuyruk olarak —
+  // AiChecklistChat zaten `locations` tek elemanlı geldiğinde tekil akışla
+  // AYNI şekilde çalışır), kapalıysa HER zaman klasik form — konum
+  // sayısından bağımsız.
+  function startAndOpenFillOrAi(point, location, source = "manual") {
+    if (state.aiChecklistMode === "ai_first") {
+      setAiQueueTarget({ point, locations: [location] });
+    } else {
+      startAndOpenFill(point, location, source);
+    }
+  }
   // Kullanıcı teyidiyle: "teknikte özellikle katlardaki mahal kontrolleri
   // günlük ayrı haftalık ayrı aylık ayrı olarak aç" — tek "Mahal Kontrol"
   // kutusu yerine katta hangi periyotlar VARSA (bkz. buildTiles) o kadar ayrı
@@ -439,7 +457,7 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
       // önce bilgi/PDF panelini göster (bkz. NonConformityPanel) — çok
       // kalemli katlarda aynı ayrım roomPicker satırındaki uyarı ikonuyla.
       if (only.status === "nonconforming") { setNcTarget({ point: only.point, location: only.loc }); return; }
-      startAndOpenFill(only.point, only.loc);
+      startAndOpenFillOrAi(only.point, only.loc);
       return;
     }
     // Kullanıcı teyidiyle bulunan eksik (QA turu): kat kutusundan ("Günlük
@@ -646,11 +664,19 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
                           // Böylece Güvenlik'in kat devriyesi (Beşiktaş→Sarıyer) ve
                           // Temizlik'in alan turu (Lobi→WC→Otopark→...) de aynı
                           // "tek soru sor, onayla, sonrakine geç" deneyimini alıyor.
+                          // Kullanıcı teyidiyle (tutarsızlık ekran görüntüsü): AI
+                          // kuyruğu eskiden SADECE aynı noktanın birden fazla
+                          // konumu varsa (isMultiLocation) tetikleniyordu — tek
+                          // konumlu bir noktaya bu seçiciden tıklanınca (ör. bir
+                          // katta birkaç FARKLI oda varsa, her biri kendi
+                          // noktasında TEK konum) Ayarlar'daki anahtardan bağımsız
+                          // hep klasik forma düşüyordu. Artık TEK karar noktası
+                          // aiChecklistMode (bkz. startAndOpenFillOrAi) — tek
+                          // konumlu noktalarda kuyruk tek elemanlı olur.
                           const sameLocs = items.filter((it) => it.point.id === c.point.id).map((it) => it.loc).filter(Boolean);
-                          const isMultiLocation = sameLocs.length > 1;
-                          if (state.aiChecklistMode === "ai_first" && isMultiLocation) {
+                          if (state.aiChecklistMode === "ai_first") {
                             setRoomPicker(null);
-                            setAiQueueTarget({ point: c.point, locations: rotateLocations(sameLocs, c.loc.key) });
+                            setAiQueueTarget({ point: c.point, locations: rotateLocations(sameLocs.length ? sameLocs : [c.loc], c.loc.key) });
                           } else {
                             startAndOpenFill(c.point, c.loc);
                           }
