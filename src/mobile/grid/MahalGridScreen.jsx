@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Wrench, ClipboardCheck, Gauge, Droplet, Flame, Zap, Percent, Sparkles, ShieldCheck, AlertTriangle } from "lucide-react";
 import { getLocations, runFor, hasNonConformity, resolveMeters, buildMahalFillPatch, startMahalRun, NonConformityPanel, FillModal } from "../../pages/MahalKontrol.jsx";
+import { AiChecklistChat } from "../checklist/AiChecklistChat.jsx";
 import { validateReading, latestReading } from "../../lib/meterValidation.js";
 import { MAHAL_PERIODS } from "../../mockData.js";
 import { floorPhrase } from "../../piramitData.js";
@@ -74,6 +75,20 @@ function powerFactor(activeKw, reactiveKvar) {
   return { apparentKva, cosPhi: apparentKva > 0 ? activeKw / apparentKva : 0 };
 }
 
+// Kullanıcı teyidiyle: "soğutma odasının qr'ı okutuldu... chiller 1'den
+// başla seçti... chiller bittiğinde diğerine geç" — AI Checklist modu
+// (ai_first) ekipman-bazlı gruplu bir mahalde (mtd3/mtd4 gibi) tek bir
+// ekipmanla sınırlı kalmıyor, kullanıcının seçtiği ekipmandan başlayıp
+// odadaki TÜM ekipmanları sırayla geziyor (bkz. AiChecklistChat.jsx'in
+// `locations` kuyruğu). Bu, seçilen konumdan başlayacak şekilde listeyi
+// döndürür — ör. [Kazan1,Kazan2,Kazan3,...] içinde Kazan2 seçilirse
+// [Kazan2,Kazan3,...,Kazan1] olur, hiçbir ekipman atlanmaz.
+function rotateLocations(locations, startKey) {
+  const idx = locations.findIndex((l) => l.key === startKey);
+  if (idx <= 0) return locations;
+  return [...locations.slice(idx), ...locations.slice(0, idx)];
+}
+
 // Faz 5 — "Mahal ızgarası" (bkz. mobil-ui-prompt 6.6). Kontrol doldurma
 // (FillModal/buildMahalFillPatch) ve arıza kaydı (TaskForm/emptyTask) TEK
 // KAYNAK: MahalKontrol.jsx ile Kontroller.jsx'in kullandığı AYNI fonksiyon
@@ -99,7 +114,11 @@ function buildCells(points, state) {
   return cells.map((c) => {
     const nonconforming = hasNonConformity(c.point, state, c.loc?.key);
     const run = runFor(c.point, state.mahalRuns, c.loc?.key, null);
-    const status = nonconforming ? "nonconforming" : run?.status === "Tamamlandı" ? "done" : "pending";
+    // "Kapalı" — kullanıcı teyidiyle: "ekipmanlardan biri kapalı olabilir
+    // kapalı olanları için sistem kapalı işareti koy" (bkz. MahalKontrol.jsx
+    // buildOfflineMarkPatch). Ne "tamamlandı" (gerçek ölçüm) ne "bekliyor"
+    // (hiç ziyaret edilmemiş) — ayrı bir üçüncü durum.
+    const status = nonconforming ? "nonconforming" : run?.status === "Tamamlandı" ? "done" : run?.status === "Kapalı" ? "off" : "pending";
     return { ...c, status };
   });
 }
@@ -283,6 +302,10 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
   // varsa "hangi oda" seçici HEM Mahal Kontrol HEM Arıza için aynı sheet
   // (mode ile ayrılıyor, iki ayrı bileşen yazılmadı).
   const [roomPicker, setRoomPicker] = useState(null); // { group, mode: "kontrol" | "ariza" }
+  // Kullanıcı teyidiyle: AI Checklist (ai_first) modunda ekipman-bazlı gruplu
+  // bir mahalde bir konum seçilince, tek FillModal yerine tüm odayı sırayla
+  // gezen sohbet açılır (bkz. rotateLocations + AiChecklistChat.jsx).
+  const [aiQueueTarget, setAiQueueTarget] = useState(null); // { point, locations }
   const [openFloors, setOpenFloors] = useState(() => new Set());
   // Teknik'e özel — kullanıcı teyidiyle: "katlara sayaçları ekle... kompanzasyonlarıda ayrı belirt".
   const [meterTarget, setMeterTarget] = useState(null); // { group, meters }
@@ -335,12 +358,18 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
         const allLocs = getLocations(point, state);
         const locs = focusFloorLabel ? allLocs.filter((l) => l.floorLabel == null || l.floorLabel === focusFloorLabel) : allLocs;
         if (locs.length === 1) {
-          startAndOpenFill(point, locs[0], "qr");
+          const loc = locs[0];
+          const isEquipmentGroup = point.locations && point.locations.length > 1 && !loc.floorLabel;
+          if (state.aiChecklistMode === "ai_first" && isEquipmentGroup) {
+            setAiQueueTarget({ point, locations: rotateLocations(point.locations, loc.key) });
+          } else {
+            startAndOpenFill(point, loc, "qr");
+          }
         } else if (locs.length > 1) {
           const items = locs.map((loc) => {
             const nonconforming = hasNonConformity(point, state, loc.key);
             const run = runFor(point, state.mahalRuns, loc.key, null);
-            const status = nonconforming ? "nonconforming" : run?.status === "Tamamlandı" ? "done" : "pending";
+            const status = nonconforming ? "nonconforming" : run?.status === "Tamamlandı" ? "done" : run?.status === "Kapalı" ? "off" : "pending";
             return { key: `${point.id}_${loc.key}`, label: loc.label, point, loc, status };
           });
           setRoomPicker({ group: { floor: focusFloorLabel ? floorPhrase(focusFloorLabel) : point.name }, mode: "kontrol", items, title: locs[0]?.floorLabel ? "hangi konum?" : "hangi ekipman?" });
@@ -563,9 +592,29 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
             )}
             {roomPicker.mode === "kontrol" && (roomPicker.items || roomPicker.group.items).map((c) => (
               <div key={c.key} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${t.hairline}` }}>
-                <button onClick={() => startAndOpenFill(c.point, c.loc)}
-                  style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0, boxSizing: "border-box", minHeight: 48, padding: "12px 16px", fontSize: 14.5, color: t.ink }}>
-                  {c.label}
+                <button
+                  onClick={() => {
+                    // AI Checklist (ai_first) + ekipman-bazlı gruplu bir
+                    // mahal (birden fazla `locations`, floorLabel'sız —
+                    // guv_tur/fireEquipment gibi çok-katlı türetilmiş
+                    // konumlarla karışmasın diye) → seçilen ekipmandan
+                    // başlayan, odayı sırayla gezen AI sohbeti açılır.
+                    // Aksi halde (AI kapalı, tek konum, veya patrol-tipi
+                    // çok-katlı konum) eskisi gibi doğrudan klasik form.
+                    const groupLocs = c.point.locations;
+                    const isEquipmentGroup = groupLocs && groupLocs.length > 1 && !c.loc?.floorLabel;
+                    if (state.aiChecklistMode === "ai_first" && isEquipmentGroup) {
+                      setRoomPicker(null);
+                      setAiQueueTarget({ point: c.point, locations: rotateLocations(groupLocs, c.loc.key) });
+                    } else {
+                      startAndOpenFill(c.point, c.loc);
+                    }
+                  }}
+                  style={{ all: "unset", cursor: "pointer", flex: 1, minWidth: 0, boxSizing: "border-box", minHeight: 48, padding: "12px 16px", fontSize: 14.5, color: t.ink, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{c.label}</span>
+                  {c.status === "off" && (
+                    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: t.muted, background: t.hairline, borderRadius: 999, padding: "2px 8px" }}>Kapalı</span>
+                  )}
                 </button>
                 {c.status === "nonconforming" && (
                   <button onClick={() => setNcTarget({ point: c.point, location: c.loc })} title="Uygunsuzluk bilgisi"
@@ -599,6 +648,12 @@ export function MahalGridScreen({ state, updateState, currentUserName, departmen
 
       {ncTarget && (
         <NonConformityPanel point={ncTarget.point} location={ncTarget.location} state={state} onClose={() => setNcTarget(null)} />
+      )}
+
+      {aiQueueTarget && (
+        <AiChecklistChat state={state} updateState={updateState} currentUser={currentUserName} department={department}
+          point={aiQueueTarget.point} locations={aiQueueTarget.locations}
+          onClose={() => setAiQueueTarget(null)} />
       )}
     </div>
   );

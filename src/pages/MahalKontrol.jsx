@@ -349,6 +349,26 @@ export function buildMahalFillPatch(state, point, location, { inspector, answers
   return { mahalRuns, tasks, compensationReadings, gasReadings, waterReadings, assets };
 }
 
+// Kullanıcı teyidiyle: "bakım anında ekipmanlardan biri kapalı olabilir
+// kapalı olanları için sistem kapalı işareti koy" — ekipman-bazlı gruplu
+// mahallerde (bkz. mtd3/mtd4 locations) bazı ekipmanlar (yedek/dönüşümlü
+// çalışan chiller, mevsimlik kapatılan kazan vb.) bakım turunda GERÇEKTEN
+// kapalı bulunabilir; bu durumda soru sormanın (ör. "çıkış suyu sıcaklığı
+// kaç derece?") bir anlamı yok, cevap uydurmak yanlış olur. Bu run'ı normal
+// "Tamamlandı" (gerçek ölçüm/gözlem) İLE KARIŞTIRMAMAK için ayrı bir
+// "Kapalı" durumuyla işaretler — ne bir uygunsuzluk/arıza kaydı açar ne de
+// "hiç kontrol edilmemiş" (G1) sayılır, sadece "bu dönem ziyaret edildi ve
+// kapalı bulundu" bilgisini taşır.
+export function buildOfflineMarkPatch(state, point, location, { inspector, note }) {
+  const key = periodKey(point.period);
+  const existing = runFor(point, state.mahalRuns, location?.key, null);
+  const runPatch = { status: "Kapalı", completedBy: inspector, startedAt: existing?.startedAt || new Date().toISOString(), completedAt: new Date().toISOString(), note: note || "", offline: true, answers: {}, failedQuestions: [] };
+  const mahalRuns = existing
+    ? state.mahalRuns.map((r) => (r.id === existing.id ? { ...r, ...runPatch } : r))
+    : [...state.mahalRuns, { id: `mr_${point.id}_${location?.key || "x"}_${key}`, pointId: point.id, department: point.department, periodKey: key, locationKey: location?.key, createdAt: new Date().toISOString(), ...runPatch }];
+  return { mahalRuns };
+}
+
 // floorGroup verilmişse (perFloor kart, bkz. PerFloorCard) QR o katın TÜM
 // konumlarını listeleyen görünüme gider (?floor=), location verilmişse tekil
 // bir konuma (?loc=) — kullanıcı teyidiyle: "5. Katta qr okuttun 5. kattaki

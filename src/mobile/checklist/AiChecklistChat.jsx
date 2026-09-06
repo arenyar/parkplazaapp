@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Sparkles, ShieldAlert, Camera } from "lucide-react";
 import { useTheme } from "../../lib/ThemeContext.jsx";
 import { Card, Button, Input } from "../../components/ui.jsx";
-import { FillModal, buildMahalFillPatch, startMahalRun, runFor, resolveMeters } from "../../pages/MahalKontrol.jsx";
+import { FillModal, buildMahalFillPatch, buildOfflineMarkPatch, startMahalRun, runFor, resolveMeters } from "../../pages/MahalKontrol.jsx";
 import { requestAiChecklistTurn, computeCoverage, AI_CHECKLIST_LIMITS } from "../../lib/aiChecklist.js";
 import { resizeImage, uploadResizedBlob, blobToBase64 } from "../../lib/storage.js";
 
@@ -18,31 +18,70 @@ const SEVERITY_COLOR = { bilgi: "#3FB37F", takip: "#E0B354", acil: "#DC5A34" };
 // lib/aiChecklist.js AI_CHECKLIST_LIMITS) — aynı görsel HEM Storage'a
 // (klasik moddaki "mahal-fotograflari" prefix'iyle, run.photoUrl olarak
 // AYNI yere) HEM Gemini'ye (inline base64, vision) gider — tek resize.
-export function AiChecklistChat({ state, updateState, currentUser, point, location, department, asset, onClose }) {
+// Kullanıcı teyidiyle: "soğutma odasının qr'ı okutuldu... chiller 1'den
+// başla seçti... tekrar tek ekran soruyu sor onayladıkça diğer soruya geç...
+// chiller bittiğinde diğerine geç" — tek bir ekipmanla sınırlı kalmak yerine
+// `locations` bir KUYRUK olarak verilir (bkz. MahalGridScreen.jsx
+// rotateLocations); bir ekipman bitince (finalize onaylanınca veya "kapalı"
+// işaretlenince) otomatik olarak sıradakine geçilir, hepsi bitince kapanır.
+// Geriye dönük uyumluluk: tekil ekipman-QR girişi (bkz. Teknik/Guvenlik/
+// Temizlik.jsx aiChecklistTarget) `locations` yerine tekil `location`+`asset`
+// verir — bu durumda kuyruk tek elemanlıdır.
+export function AiChecklistChat({ state, updateState, currentUser, point, location, locations, department, asset, onClose }) {
   const T = useTheme();
-  const questions = location?.questions || point.questions;
-  const [mode, setMode] = useState("ai");
+  const queue = locations || [location];
+  const [activeIndex, setActiveIndex] = useState(0);
+  const activeLocation = queue[activeIndex] ?? null;
+  const questions = activeLocation?.questions || point.questions;
+  const activeAsset = locations ? (state.assets || []).find((a) => a.id === (activeLocation?.assetId || point.assetId)) : asset;
+  // "offcheck" — kullanıcı teyidiyle: "bakım anında ekipmanlardan biri kapalı
+  // olabilir kapalı olanları için sistem kapalı işareti koy... bu mantık tüm
+  // kontroller için geçerli" — AI'ya sorulmadan (ağ gerektirmez, anında),
+  // odadaki HER ekipmana geçilmeden önce sorulur.
+  const [mode, setMode] = useState("offcheck");
   const [history, setHistory] = useState([]);
   const [turnCount, setTurnCount] = useState(0);
   const [current, setCurrent] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [fallbackNotice, setFallbackNotice] = useState(null);
   const [draft, setDraft] = useState("");
   const [photoCount, setPhotoCount] = useState(0);
   const [sessionPhotoUrl, setSessionPhotoUrl] = useState(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const startedAtRef = useRef(Date.now());
-  const startedRunRef = useRef(false);
 
-  // Checklist'i açar açmaz run "Üzr. Çalışılıyor" kaydedilir — klasik moddaki
-  // AYNI "başladım" izi (bkz. MahalGridScreen startAndOpenFill notu).
+  // Kuyruktaki her yeni ekipmana geçildiğinde (mount dahil — activeIndex 0
+  // ile başlar) sohbet durumu sıfırlanır, run "Üzr. Çalışılıyor" kaydedilir
+  // ve önce "kapalı mı?" sorusu gösterilir.
   useEffect(() => {
-    if (startedRunRef.current) return;
-    startedRunRef.current = true;
-    updateState(startMahalRun(state, point, location, currentUser));
-    runTurn([], 0, null);
+    setHistory([]);
+    setTurnCount(0);
+    setCurrent(null);
+    setFallbackNotice(null);
+    setDraft("");
+    setPhotoCount(0);
+    setSessionPhotoUrl(null);
+    setMode("offcheck");
+    startedAtRef.current = Date.now();
+    updateState(startMahalRun(state, point, activeLocation, currentUser));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeIndex]);
+
+  // Kuyrukta sıradaki ekipmana geç, hiç kalmadıysa oturumu kapat.
+  function advance() {
+    if (activeIndex + 1 < queue.length) setActiveIndex((i) => i + 1);
+    else onClose();
+  }
+
+  function markOff() {
+    updateState(buildOfflineMarkPatch(state, point, activeLocation, { inspector: currentUser }));
+    advance();
+  }
+
+  function confirmOn() {
+    setMode("ai");
+    runTurn([], 0, null);
+  }
 
   function fallbackToClassic(reason) {
     setFallbackNotice(reason);
@@ -60,7 +99,7 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
       return;
     }
     try {
-      const assetContext = { manufacturer: asset?.manufacturer, model: asset?.model, category: asset?.category, criticality: asset?.criticality, floorLabel: point.floorLabel };
+      const assetContext = { manufacturer: activeAsset?.manufacturer, model: activeAsset?.model, category: activeAsset?.category, criticality: activeAsset?.criticality, floorLabel: point.floorLabel };
       const turn = await requestAiChecklistTurn({ assetContext, questions, history: nextHistory, turnCount: nextTurnCount, photoBase64: photo?.base64, photoMimeType: photo?.mimeType });
       if (turn.action === "request_photo") {
         if (photoCount >= AI_CHECKLIST_LIMITS.maxPhotosPerSession) {
@@ -140,45 +179,64 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
   function submitFillFromAi() {
     const answers = buildInitialAnswersForClassic();
     const note = current?.diagnosis?.summary || "";
-    let patch = buildMahalFillPatch(state, point, location, { inspector: currentUser, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
+    let patch = buildMahalFillPatch(state, point, activeLocation, { inspector: currentUser, answers, note, photo: !!sessionPhotoUrl, photoUrl: sessionPhotoUrl, startedAt: new Date().toISOString() });
     if (patch.mahalRuns) {
-      patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (location?.key || null) ? { ...r, verifiedBy: "qr", aiAssisted: true } : r)) };
+      patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (activeLocation?.key || null) ? { ...r, verifiedBy: "qr", aiAssisted: true } : r)) };
     }
     updateState(patch);
-    onClose();
+    advance();
   }
 
   if (mode === "classic") {
     return (
-      <FillModal point={point} location={location} shift={null}
-        meters={resolveMeters(state, point, location)} state={state}
-        run={runFor(point, state.mahalRuns, location?.key || null, null)}
+      <FillModal point={point} location={activeLocation} shift={null}
+        meters={resolveMeters(state, point, activeLocation)} state={state}
+        run={runFor(point, state.mahalRuns, activeLocation?.key || null, null)}
         team={state.team.filter((tm) => tm.department === department)} currentUser={currentUser} assets={state.assets}
         initialAnswers={buildInitialAnswersForClassic()}
         onSubmit={(payload) => {
-          let patch = buildMahalFillPatch(state, point, location, payload);
-          if (patch.mahalRuns) patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (location?.key || null) ? { ...r, verifiedBy: "qr" } : r)) };
+          let patch = buildMahalFillPatch(state, point, activeLocation, payload);
+          if (patch.mahalRuns) patch = { ...patch, mahalRuns: patch.mahalRuns.map((r) => (r.pointId === point.id && (r.locationKey || null) === (activeLocation?.key || null) ? { ...r, verifiedBy: "qr" } : r)) };
           updateState(patch);
-          onClose();
+          advance();
         }}
         onClose={onClose} />
     );
   }
 
+  // Kullanıcı teyidiyle: "qr okuttuğunda form ekranı ortalasın personelin
+  // odağı form olsun" — alt sheet (flex-end) yerine klasik FillModal'ın
+  // ZATEN kullandığı ortalanmış modal deseni (bkz. MahalKontrol.jsx, ör.
+  // satır 617) — arkadaki kat/liste ekranı dikkat dağıtmasın, teknisyenin
+  // tüm odağı bu form olsun.
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 270, background: "rgba(20,49,40,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 270, background: "rgba(20,49,40,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto" }}>
-        <Card style={{ margin: 0, borderRadius: "16px 16px 0 0" }}>
+        <Card style={{ margin: 0, borderRadius: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Sparkles size={15} color={T.accent} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{point.name}{location ? ` — ${location.label}` : ""}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{point.name}{activeLocation ? ` — ${activeLocation.label}` : ""}</span>
             </div>
             <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: T.dim, display: "flex" }}><X size={18} /></button>
           </div>
-          <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>Soru {turnCount + 1} · yapay zeka destekli kontrol{sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}</div>
+          <div style={{ fontSize: 10.5, color: T.dimmer, marginBottom: 12 }}>
+            {queue.length > 1 && `Ekipman ${activeIndex + 1}/${queue.length} · `}
+            {mode === "offcheck" ? "durum kontrolü" : `Soru ${turnCount + 1} · yapay zeka destekli kontrol`}
+            {sessionPhotoUrl ? " · 📷 fotoğraf eklendi" : ""}
+          </div>
 
           {fallbackNotice && <div style={{ fontSize: 11.5, color: "#DC5A34", marginBottom: 8 }}>{fallbackNotice}</div>}
+
+          {mode === "offcheck" && (
+            <div>
+              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>Bu ekipman şu an kapalı/devre dışı mı?</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button variant="ghost" onClick={markOff} style={{ flex: 1 }}>Evet, kapalı</Button>
+                <Button onClick={confirmOn} style={{ flex: 1 }}>Hayır, çalışıyor</Button>
+              </div>
+            </div>
+          )}
 
           {(loading || uploadingPhoto) && <p style={{ fontSize: 13, color: T.dim }}>{uploadingPhoto ? "Fotoğraf yükleniyor…" : "Yapay zeka düşünüyor…"}</p>}
 
@@ -224,15 +282,17 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
               {current.diagnosis?.recommendedAction && <p style={{ fontSize: 12.5, color: T.dim, margin: "0 0 10px" }}>Öneri: {current.diagnosis.recommendedAction}</p>}
               {current.diagnosis?.confidence != null && <p style={{ fontSize: 11, color: T.dimmer, margin: "0 0 12px" }}>Güven skoru: %{Math.round(current.diagnosis.confidence * 100)} — bu bir ÖNERİDİR, kaydı siz onaylıyorsunuz.</p>}
               <div style={{ display: "flex", gap: 8 }}>
-                <Button onClick={submitFillFromAi} style={{ flex: 1 }}>Onayla ve Kaydet</Button>
+                <Button onClick={submitFillFromAi} style={{ flex: 1 }}>{activeIndex + 1 < queue.length ? "Onayla, Sonrakine Geç" : "Onayla ve Kaydet"}</Button>
                 <Button variant="ghost" onClick={() => fallbackToClassic(null)}>Düzenle</Button>
               </div>
             </div>
           )}
 
-          <button onClick={() => fallbackToClassic(null)} style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.dimmer, marginTop: 14 }}>
-            <ShieldAlert size={12} /> Klasik Forma Geç
-          </button>
+          {mode !== "offcheck" && (
+            <button onClick={() => fallbackToClassic(null)} style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.dimmer, marginTop: 14 }}>
+              <ShieldAlert size={12} /> Klasik Forma Geç
+            </button>
+          )}
         </Card>
       </div>
     </div>
