@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
-import { Plus, Pencil, Trash2, QrCode, Camera, X, ClipboardCheck, AlertTriangle, Printer } from "lucide-react";
+import { Plus, Pencil, Trash2, QrCode, Camera, X, ClipboardCheck, AlertTriangle, Printer, Sparkles } from "lucide-react";
 import { useTheme } from "../lib/ThemeContext.jsx";
 import { PageHeader, Card, Button, Select, Input, Field, TextArea } from "../components/ui.jsx";
 import { PrintHeader, FindingsPage } from "../components/PrintDocument.jsx";
@@ -18,9 +18,117 @@ import { EQUIPMENT_TASK_TEMPLATES } from "../lib/taskTemplates.js";
 import { uploadPhoto, uploadDataUrl } from "../lib/storage.js";
 import { turKey, buildTurPlan, buildTurPlanForPoint, findActiveTur, startTurPatch, markVisitedPatch, nextExpectedIndex, markSkippedPatch, closeTurPatch, turSummary, staleOpenTurs, PATROL_ESTIMATED_MINUTES, PATROL_TOLERANCE_MINUTES } from "../lib/mahalTur.js";
 import { getOfflineGuidance } from "../lib/offlineGuidance.js";
+import { requestMahalQuestions } from "../lib/mahalQuestionGen.js";
 
 function emptyPoint(department) {
-  return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }], active: true };
+  return { id: null, department, role: "", name: "", assetId: "", assetDesc: "", period: "Aylık", scheduleDay: "", shifts: [], questions: [{ text: "", failOn: "Hayır" }], perFloor: false, groupByFloor: false, locations: [], active: true };
+}
+
+// Kullanıcı teyidiyle: "mahal tanımı yapar ekipman seçer ekipmana özel
+// sorular belirlenir" — flat (`point.questions`) VE ekipman-bazlı gruplu
+// (`location.questions`) editörlerin İKİSİ de AYNI soru satırını kullanır
+// — tek kaynak, iki ayrı UI icat edilmedi. `type` alanı önceden formda hiç
+// düzenlenemiyordu (sadece Evet/Hayır) — artık Sayısal seçilebiliyor
+// (min/max/unit ile), AI'nin ürettiği sayısal sorular da doğru görüntülenir.
+function QuestionRow({ q, onChange, onRemove }) {
+  const T = useTheme();
+  const isNumeric = q.type === "sayi";
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      <Input value={q.text} onChange={(e) => onChange({ text: e.target.value })} placeholder="Soru metni…" style={{ flex: 1, minWidth: 160 }} />
+      <Select value={isNumeric ? "sayi" : "bool"} onChange={(e) => onChange(e.target.value === "sayi" ? { type: "sayi", unit: q.unit || "", min: q.min ?? 0, max: q.max ?? 100, failOn: undefined } : { type: undefined, failOn: q.failOn || "Hayır", unit: undefined, min: undefined, max: undefined })} style={{ width: 110 }}>
+        <option value="bool">Evet/Hayır</option>
+        <option value="sayi">Sayısal</option>
+      </Select>
+      {isNumeric ? (
+        <>
+          <Input type="number" value={q.min ?? ""} onChange={(e) => onChange({ min: Number(e.target.value) })} placeholder="Min" style={{ width: 70 }} />
+          <Input type="number" value={q.max ?? ""} onChange={(e) => onChange({ max: Number(e.target.value) })} placeholder="Max" style={{ width: 70 }} />
+          <Input value={q.unit || ""} onChange={(e) => onChange({ unit: e.target.value })} placeholder="Birim" style={{ width: 70 }} />
+        </>
+      ) : (
+        <Select value={q.failOn || "Hayır"} onChange={(e) => onChange({ failOn: e.target.value })} style={{ width: 150 }}>
+          <option value="Hayır">Hatalı cevap: Hayır</option>
+          <option value="Evet">Hatalı cevap: Evet</option>
+        </Select>
+      )}
+      <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#E2685A", flexShrink: 0 }}><Trash2 size={14} /></button>
+    </div>
+  );
+}
+
+// Kullanıcı teyidiyle: "hatta kat planı gibi bir avantajımız varken yeni
+// mahal tanımlamada bu alt yapıyı kullanabiliriz. mahal tanımı yapar
+// ekipman seçer ekipmana özel sorular belirlenir yada ai soruları sorar
+// seçeneği olmalı" — mtd3/mtd4 gibi ekipman-bazlı gruplu mahaller
+// önceden SADECE kodda (mockData.js) elle yazılabiliyordu; admin web
+// formundan böyle bir nokta tanımlamanın hiçbir yolu yoktu. Bu editör tam
+// olarak o eksikliği kapatıyor: gerçek Varlıklar kaydından (state.assets)
+// bir ekipman seçilir (HTML `<datalist>` ile arama/filtreleme — yeni bir
+// bağımlılık gerekmez), sorular elle yazılabilir VEYA "AI ile Soru Öner"
+// ile (bkz. lib/mahalQuestionGen.js) taslak üretilip İNCELENEREK kaydedilir
+// — AI'nin ürettiği hiçbir şey onaysız/görülmeden kaydedilmez.
+function LocationEditorRow({ location, index, assets, onUpdate, onRemove }) {
+  const T = useTheme();
+  const asset = assets.find((a) => a.id === location.assetId);
+  const [query, setQuery] = useState(asset ? `${asset.id} — ${asset.name}` : "");
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState(null);
+
+  function handleAssetInput(v) {
+    setQuery(v);
+    const match = assets.find((a) => `${a.id} — ${a.name}` === v);
+    if (match) onUpdate({ assetId: match.id, label: location.label || match.name });
+    else if (!v) onUpdate({ assetId: "" });
+  }
+  function addQ() { onUpdate({ questions: [...location.questions, { text: "", failOn: "Hayır" }] }); }
+  function updateQ(qi, patch) { onUpdate({ questions: location.questions.map((q, i) => (i === qi ? { ...q, ...patch } : q)) }); }
+  function removeQ(qi) { onUpdate({ questions: location.questions.filter((_, i) => i !== qi) }); }
+
+  async function generateAi() {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const questions = await requestMahalQuestions({ assetName: asset?.name || location.label, manufacturer: asset?.manufacturer, model: asset?.model, category: asset?.category, notes: asset?.notes });
+      onUpdate({ questions: questions.map((q) => (q.type === "sayi" ? { text: q.text, type: "sayi", unit: q.unit || "", min: q.min ?? 0, max: q.max ?? 100 } : { text: q.text, failOn: q.failOn || "Hayır" })) });
+    } catch (err) {
+      setGenError(err.message || "Soru üretimi başarısız.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.dim, marginBottom: 4 }}>Ekipman (Varlıklar'dan seç, opsiyonel)</label>
+          <input list={`asset-list-${index}`} value={query} onChange={(e) => handleAssetInput(e.target.value)} placeholder="Ekipman adı veya ID yazın…"
+            style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 8, border: `1px solid ${T.line}`, fontSize: 13, background: T.surface, color: T.ink }} />
+          <datalist id={`asset-list-${index}`}>
+            {assets.map((a) => <option key={a.id} value={`${a.id} — ${a.name}`} />)}
+          </datalist>
+        </div>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.dim, marginBottom: 4 }}>Etiket (ör. "Kazan 2")</label>
+          <Input value={location.label} onChange={(e) => onUpdate({ label: e.target.value })} placeholder="Etiket…" />
+        </div>
+        <button onClick={onRemove} title="Bu ekipmanı kaldır" style={{ background: "none", border: "none", cursor: "pointer", color: "#E2685A", alignSelf: "flex-end", marginBottom: 8 }}><Trash2 size={16} /></button>
+      </div>
+      {asset && <div style={{ fontSize: 11, color: T.dimmer, marginBottom: 8 }}>{[asset.manufacturer, asset.model, asset.category].filter(Boolean).join(" · ") || "—"}</div>}
+
+      {location.questions.map((q, qi) => (
+        <QuestionRow key={qi} q={q} onChange={(patch) => updateQ(qi, patch)} onRemove={() => removeQ(qi)} />
+      ))}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 4 }}>
+        <button onClick={addQ} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Soru Ekle</button>
+        <button onClick={generateAi} disabled={generating} style={{ background: "none", border: "none", color: generating ? T.dimmer : "#7A5FB0", fontSize: 12, fontWeight: 700, cursor: generating ? "default" : "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+          <Sparkles size={13} /> {generating ? "Öneriliyor…" : "AI ile Soru Öner"}
+        </button>
+      </div>
+      {genError && <div style={{ fontSize: 11, color: "#DC5A34", marginTop: 4 }}>{genError} — sorular elle yazılmaya devam edilebilir.</div>}
+    </div>
+  );
 }
 
 
@@ -1399,10 +1507,19 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   }, [points.length, state.mahalRuns.length]);
 
   function startNew() { setForm(emptyPoint(department)); setFormOpen(true); }
-  function startEdit(p) { setForm(p); setFormOpen(true); }
+  // Eski (bu formdan önce, ör. mockData.js'te elle) tanımlanmış noktalarda
+  // `locations`/`perFloor` alanı hiç olmayabilir — savunmasız bırakılırsa
+  // `form.locations.map` çöker. `questions` de aynı şekilde.
+  function startEdit(p) { setForm({ ...p, questions: p.questions || [], locations: p.locations || [] }); setFormOpen(true); }
   // updatedBy/updatedAt — playbook talimatı (Faz 9): denetim izi.
   function savePoint() {
-    if (!form.name.trim() || form.questions.some((q) => !q.text.trim())) return;
+    if (!form.name.trim()) return;
+    // Gruplu modda doğrulama düz `questions` yerine her location'ın kendi
+    // soruları üzerinden yapılır (bkz. toggleGrouped) — en az bir ekipman/
+    // konum ve her birinde en az bir dolu soru olmalı.
+    if (form.perFloor) {
+      if (form.locations.length === 0 || form.locations.some((l) => !l.label.trim() || l.questions.length === 0 || l.questions.some((q) => !q.text.trim()))) return;
+    } else if (form.questions.some((q) => !q.text.trim())) return;
     const shifts = (form.shifts || []).filter((s) => s.label.trim() && s.start && s.end);
     const id = form.id || `mp_${Date.now()}`;
     const payload = { ...form, id, shifts, updatedAt: new Date().toISOString(), updatedBy: currentUser, ...(form.id ? {} : { createdAt: new Date().toISOString(), createdBy: currentUser }) };
@@ -1431,6 +1548,20 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
   function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, { text: "", failOn: "Hayır" }] })); }
   function updateQuestion(i, patch) { setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) })); }
   function removeQuestion(i) { setForm((f) => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })); }
+  // Kullanıcı teyidiyle: "mahal tanımı yapar ekipman seçer ekipmana özel
+  // sorular belirlenir" — grup modu açılınca düz `questions` boşaltılır
+  // (mtd3/mtd4'teki desenle AYNI: gruplu noktalarda questions:[] olur,
+  // gerçek sorular her location'ın kendi questions'ında yaşar), kapatılınca
+  // tam tersi — locations boşaltılıp düz bir soru geri eklenir.
+  function toggleGrouped(next) {
+    setForm((f) => (next
+      ? { ...f, perFloor: true, groupByFloor: false, questions: [], locations: f.locations.length > 0 ? f.locations : [{ key: `loc_${Date.now()}`, label: "", assetId: "", questions: [{ text: "", failOn: "Hayır" }] }] }
+      : { ...f, perFloor: false, groupByFloor: false, locations: [], questions: f.questions.length > 0 ? f.questions : [{ text: "", failOn: "Hayır" }] }));
+  }
+  function addLocation() { setForm((f) => ({ ...f, locations: [...f.locations, { key: `loc_${Date.now()}`, label: "", assetId: "", questions: [{ text: "", failOn: "Hayır" }] }] })); }
+  function addGeneralLocation() { setForm((f) => ({ ...f, locations: [...f.locations, { key: "genel", label: "Genel", questions: [{ text: "", failOn: "Hayır" }] }] })); }
+  function updateLocation(i, patch) { setForm((f) => ({ ...f, locations: f.locations.map((l, idx) => (idx === i ? { ...l, ...patch } : l)) })); }
+  function removeLocation(i) { setForm((f) => ({ ...f, locations: f.locations.filter((_, idx) => idx !== i) })); }
   // Vardiyalar — kullanıcı teyidiyle: "gündüz vardiyası 14:00 ile 18:00 da
   // gece vardiyası 22:00 ile 04:00 da gibi devriye saatleri değiştirilebilir".
   // Sadece "Günlük" periyotlu noktalarda anlamlı (bkz. form altındaki JSX).
@@ -1603,18 +1734,58 @@ export function MahalKontrol({ state, updateState, currentUser, department, titl
               <button onClick={addShift} style={{ background: "none", border: "none", color: T.accent, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0 12px" }}>+ Vardiya Ekle</button>
             </div>
           )}
-          <div style={{ marginTop: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3 }}>Kontrol Soruları</div>
-          {form.questions.map((q, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-              <Input value={q.text} onChange={(e) => updateQuestion(i, { text: e.target.value })} placeholder="Soru metni…" style={{ flex: 1 }} />
-              <Select value={q.failOn} onChange={(e) => updateQuestion(i, { failOn: e.target.value })} style={{ width: 150 }}>
-                <option value="Hayır">Hatalı cevap: Hayır</option>
-                <option value="Evet">Hatalı cevap: Evet</option>
-              </Select>
-              <button onClick={() => removeQuestion(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#E2685A", flexShrink: 0 }}><Trash2 size={14} /></button>
+          {/* Kullanıcı teyidiyle: "hatta kat planı gibi bir avantajımız
+              varken yeni mahal tanımlamada bu alt yapıyı kullanabiliriz.
+              mahal tanımı yapar ekipman seçer ekipmana özel sorular
+              belirlenir" — Isıtma Odası/Chiller gibi TEK odada birden
+              fazla bağımsız ekipman (her biri kendi assetId + sorularıyla)
+              varsa bu mod açılır; kapalıyken form eskisi gibi tek bir
+              düz soru listesi kullanır (davranış birebir korunur). */}
+          {/* Güvenlik ağı: guv_tur gibi devriye noktalarında `locations` 90'a
+              yakın öğe içerebilir (bu ekran KÜÇÜK ekipman grupları için
+              tasarlandı, o kadar satırı burada göstermek/düzenlemek pratik
+              değil ve floorLabel/side/shifts gibi alanları kazara bozma
+              riski taşır), fireEquipment noktalarında ise `locations` hiç
+              YOK (`deriveLocations` ile canlı türetiliyor, bkz.
+              getLocations) — ikisi de buradan DEĞİŞTİRİLEMEZ, sadece
+              bilgilendirme gösterilir. */}
+          {(() => {
+            const derived = !!form.deriveLocations;
+            const tooLarge = (form.locations || []).length > 20;
+            const guard = derived ? "derived" : tooLarge ? "large" : null;
+            return (
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 10, fontSize: 12.5, fontWeight: 700, color: guard ? T.dimmer : T.ink, cursor: guard ? "default" : "pointer" }}>
+                  <input type="checkbox" checked={form.perFloor} disabled={!!guard} onChange={(e) => toggleGrouped(e.target.checked)} />
+                  Bu mahalde birden fazla bağımsız ekipman var (ör. Kazan Dairesi: Kazan 1/2/3, Brülör 1/2/3…)
+                </label>
+                {guard === "derived" && <p style={{ fontSize: 11.5, color: T.dimmer, marginTop: -4, marginBottom: 10 }}>Bu nokta konumlarını otomatik/türetilmiş bir kaynaktan alıyor (ör. yangın ekipmanı) — buradan değiştirilemez.</p>}
+                {guard === "large" && <p style={{ fontSize: 11.5, color: T.dimmer, marginTop: -4, marginBottom: 10 }}>Bu mahalde {form.locations.length} konum var (devriye turu gibi) — bu ekran küçük ekipman grupları (2-15 arası) için tasarlandı, büyük listeler buradan değiştirilemez.</p>}
+                {guard ? null : form.perFloor ? (
+            <div>
+              <div style={{ marginBottom: 4, fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3 }}>Ekipmanlar</div>
+              {form.locations.map((loc, i) => (
+                <LocationEditorRow key={loc.key} location={loc} index={i} assets={state.assets || []} onUpdate={(patch) => updateLocation(i, patch)} onRemove={() => removeLocation(i)} />
+              ))}
+              <div style={{ display: "flex", gap: 14 }}>
+                <button onClick={addLocation} style={{ background: "none", border: "none", color: T.accent, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0 12px" }}>+ Ekipman Ekle</button>
+                {!form.locations.some((l) => l.key === "genel") && (
+                  <button onClick={addGeneralLocation} style={{ background: "none", border: "none", color: T.dim, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0 12px" }}>+ Genel (ortak) Soru Grubu Ekle</button>
+                )}
+              </div>
             </div>
-          ))}
-          <button onClick={addQuestion} style={{ background: "none", border: "none", color: T.accent, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0 12px" }}>+ Soru Ekle</button>
+          ) : (
+            <div>
+              <div style={{ marginTop: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: T.dim, textTransform: "uppercase", letterSpacing: 0.3 }}>Kontrol Soruları</div>
+              {form.questions.map((q, i) => (
+                <QuestionRow key={i} q={q} onChange={(patch) => updateQuestion(i, patch)} onRemove={() => removeQuestion(i)} />
+              ))}
+              <button onClick={addQuestion} style={{ background: "none", border: "none", color: T.accent, fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "4px 0 12px" }}>+ Soru Ekle</button>
+            </div>
+                )}
+              </>
+            );
+          })()}
           <div style={{ display: "flex", gap: 8 }}>
             <Button onClick={savePoint}>Kaydet</Button>
             <Button variant="quiet" onClick={() => setFormOpen(false)}>Vazgeç</Button>
