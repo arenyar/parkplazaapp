@@ -4,6 +4,8 @@ import { DetailScreen } from "../detail/DetailScreen.jsx";
 import { TaskForm, emptyTask } from "../../components/TaskForm.jsx";
 import { stampStatusTiming } from "../../lib/taskTiming.js";
 import { consumeStockPatch } from "../../lib/stock.js";
+import { buildWhatsAppLink } from "../../lib/whatsapp.js";
+import { generateActionToken, buildWorkOrderActionLink, buildWorkOrderWhatsAppMessage, canSendWorkOrderLink } from "../../lib/workOrderLink.js";
 import { mobileTokens as t } from "../tokens.js";
 
 // Kullanıcı teyidiyle: "Talep şikayet ekranındaki talepler ile teknik
@@ -18,7 +20,7 @@ import { mobileTokens as t } from "../tokens.js";
 // TaskListScreen'in "Talep Şikayetleri" sekme-toggle'ı yerine doğrudan
 // verilen `tasks` listesini gösteriyor (bir departmanın kendi ekranında
 // zaten o departmana filtrelenmiş geliyor, ayrı bir kapsam seçiciye gerek yok).
-export function DepartmentTaskListScreen({ state, updateState, currentUserName, department, tasks, title, canWrite = true }) {
+export function DepartmentTaskListScreen({ state, updateState, currentUserName, currentUserObj, department, tasks, title, canWrite = true }) {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
   const [detailTask, setDetailTask] = useState(null);
@@ -50,6 +52,16 @@ export function DepartmentTaskListScreen({ state, updateState, currentUserName, 
     setDetailTask(payload);
   }
 
+  // TaskListScreen.jsx'teki AYNI mekanizma (bkz. o dosyadaki notu) — token
+  // yoksa üretilip Firestore'a yazılır, sonra wa.me linki açılır.
+  function sendWorkOrderWhatsApp(task, person) {
+    const token = task.actionToken || generateActionToken();
+    if (token !== task.actionToken) updateState({ tasks: state.tasks.map((tk) => (tk.id === task.id ? { ...tk, actionToken: token } : tk)) });
+    const link = buildWorkOrderActionLink(window.location.origin, task, token);
+    const waLink = buildWhatsAppLink(person.phone, buildWorkOrderWhatsAppMessage(task, link));
+    if (waLink) window.open(waLink, "_blank", "noopener");
+  }
+
   // QuickActions "…" menüsü — TaskListScreen.jsx'teki AYNI davranış, tekrar
   // yazılmadı sadece kopyalandı (o dosyadaki gibi burada da tek kaynak
   // olacak şekilde ortak bir yere taşımak bu değişikliğin kapsamı dışında).
@@ -79,6 +91,9 @@ export function DepartmentTaskListScreen({ state, updateState, currentUserName, 
     return (
       <DetailScreen
         task={live} canWrite={canWrite} onBack={() => setDetailTask(null)}
+        team={state.team}
+        canSendWhatsApp={canWrite && canSendWorkOrderLink(currentUserObj)}
+        onSendWhatsApp={sendWorkOrderWhatsApp}
         onEdit={(override) => openEdit(live, override)} onAdvanceStatus={(status) => advanceStatus(live, status)}
         onQuickAction={handleQuickAction}
       />

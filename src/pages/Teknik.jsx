@@ -208,7 +208,7 @@ export function Teknik({ state, updateState, currentUser, currentUserObj, role, 
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Teknik" tasks={genel} title="Görevler" canWrite={canWrite} />
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} currentUserObj={currentUserObj} department="Teknik" tasks={genel} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${genel.length} kayıt — Teknik departmanının genel işleri`}

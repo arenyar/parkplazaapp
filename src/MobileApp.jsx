@@ -110,7 +110,7 @@ function renderScreen(screenKey, p) {
     // üzerine yazılır.
     case "bakim": return <Teknik key={p.activeNavKey} state={p.state} updateState={p.updateState} currentUser={p.currentUserName} currentUserObj={p.currentUser} role={p.role} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("bakim")} mobileMode />;
     case "kontroller": return <Kontroller state={p.state} updateState={p.updateState} currentUser={p.currentUserName} canWrite={p.canWrite("kontroller")} />;
-    case "guvenlik": return <Guvenlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("guvenlik")} mobileMode />;
+    case "guvenlik": return <Guvenlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} currentUserObj={p.currentUser} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("guvenlik")} mobileMode />;
     // Kullanıcı teyidiyle (QA turu): bu dal daha önce Temizlik.jsx'i HİÇ
     // mount ETMEDEN doğrudan MahalGridScreen'i render ediyordu —
     // bakim/guvenlik'in aksine `deepLink`/`onConsumeDeepLink` hiç
@@ -120,7 +120,7 @@ function renderScreen(screenKey, p) {
     // kendi içinde (mobileMode true iken, kendi MahalKontrol.jsx render'ına
     // focusPointId/focusLocationKey'i deepLink olarak ilettiği mantıkla)
     // doğru şekilde mount ediliyor (bkz. Temizlik.jsx).
-    case "temizlik": return <Temizlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("temizlik")} mobileMode />;
+    case "temizlik": return <Temizlik state={p.state} updateState={p.updateState} currentUser={p.currentUserName} currentUserObj={p.currentUser} deepLink={p.deepLink} onConsumeDeepLink={p.onConsumeDeepLink} canWrite={p.canWrite("temizlik")} mobileMode />;
     case "dokumanlar": return <Dokumanlar state={p.state} />;
     case "raporlar": return <Raporlar state={p.state} />;
     case "ayarlar": return <Ayarlar state={p.state} updateState={p.updateState} canWrite={p.canWrite("ayarlar")} currentUser={p.currentUser} />;

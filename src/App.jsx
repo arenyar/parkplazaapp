@@ -17,6 +17,7 @@ import { resolveAssetScan } from "./lib/assetScan.js";
 import { T } from "./theme.js";
 
 import { SurveyPage } from "./pages/SurveyPage.jsx";
+import { WorkOrderPage } from "./pages/WorkOrderPage.jsx";
 import { Login } from "./pages/Login.jsx";
 import { MobileLogin } from "./pages/MobileLogin.jsx";
 import { MobileApp } from "./MobileApp.jsx";
@@ -107,6 +108,18 @@ export default function App() {
     const k = q.get("k");
     if (!t || !k) return null;
     return { taskId: t, token: k, companyName: q.get("c") || "" };
+  });
+  // Kullanıcı teyidiyle: "arıza kaydında açılan işi whatsap'tan link olarak
+  // yollayabilir miyiz" — `/anket` route'uyla AYNI desen: linke tıklayan
+  // personelin hesabı yok, bu yüzden `/is-emri` de TÜM giriş
+  // kontrollerinden ÖNCE, bağımsız render edilir (bkz. pages/WorkOrderPage.jsx).
+  const [workOrderParams] = useState(() => {
+    if (window.location.pathname !== "/is-emri") return null;
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get("t");
+    const k = q.get("k");
+    if (!t || !k) return null;
+    return { taskId: t, token: k };
   });
   // Kullanıcı teyidiyle: "Mobil uygulama son kullanıcının sahada veri
   // girdiği alan olmalı burda formlar üzerinde değişiklik yapmak yada
@@ -367,6 +380,7 @@ export default function App() {
   // ama state.users/team eşleşmesi henüz gelmedi (Firestore senkron sürüyor
   // — kısa "Yükleniyor" ekranı, Login DEĞİL, çünkü giriş zaten başarılı oldu).
   if (surveyParams) return <SurveyPage taskId={surveyParams.taskId} token={surveyParams.token} companyName={surveyParams.companyName} />;
+  if (workOrderParams) return <WorkOrderPage taskId={workOrderParams.taskId} token={workOrderParams.token} />;
   if (fbUser === undefined) return <div style={{ minHeight: "100vh", background: T.bg }} />;
   if (!fbUser) {
     return isMobileRoute

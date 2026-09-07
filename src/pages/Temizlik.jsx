@@ -22,7 +22,7 @@ const TABS = [
 // burada da department="Temizlik" ile aynı bileşenleri kullanıyor, ayrı bir
 // kopya yok. Görevler sekmesi Operasyonlar'daki Talep/Şikayet modülünden bu
 // departmana atanan kayıtları da (aynı state.tasks üzerinden) gösterir.
-export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+export function Temizlik({ state, updateState, currentUser, currentUserObj, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
   const [tab, setTab] = useState("mahal");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(null);
@@ -107,7 +107,7 @@ export function Temizlik({ state, updateState, currentUser, deepLink, onConsumeD
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Temizlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} currentUserObj={currentUserObj} department="Temizlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Temizlik departmanının işleri ve firma talepleri`}

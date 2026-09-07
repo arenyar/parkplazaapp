@@ -246,10 +246,17 @@ export function AiChecklistChat({ state, updateState, currentUser, point, locati
 
           {inspector && mode === "offcheck" && (
             <div>
-              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{itemNoun === "ekipman" ? "Bu ekipman şu an kapalı/devre dışı mı?" : "Bu alan şu an kapalı/erişime kapalı mı?"}</p>
+              {/* Kullanıcı teyidiyle: "resimdeki soruyu bu alanı yada
+                  ekipmanı kontrol başlayacakmısın olarak düzenle" — eski
+                  soru ekipmanın/alanın DURUMUNU soruyordu ("kapalı mı?"),
+                  yeni soru doğrudan personelin NİYETİNİ soruyor ("kontrole
+                  başlayacak mısın?") — Hayır cevabı AYNI markOff patch'ine
+                  (bkz. buildOfflineMarkPatch), Evet AYNI confirmOn'a gider,
+                  sadece soru/buton metni netleşti. */}
+              <p style={{ fontSize: 14.5, fontWeight: 600, color: T.ink, marginBottom: 12 }}>{itemNoun === "ekipman" ? "Bu ekipmanı kontrol etmeye başlayacak mısın?" : "Bu alanı kontrol etmeye başlayacak mısın?"}</p>
               <div style={{ display: "flex", gap: 8 }}>
-                <Button variant="ghost" onClick={markOff} style={{ flex: 1 }}>Evet, kapalı</Button>
-                <Button onClick={confirmOn} style={{ flex: 1 }}>{itemNoun === "ekipman" ? "Hayır, çalışıyor" : "Hayır, açık"}</Button>
+                <Button variant="ghost" onClick={markOff} style={{ flex: 1 }}>Hayır</Button>
+                <Button onClick={confirmOn} style={{ flex: 1 }}>Evet</Button>
               </div>
             </div>
           )}

@@ -8,6 +8,8 @@ import { deptColor } from "../../theme.js";
 import { mobileTokens as t } from "../tokens.js";
 import { stampStatusTiming } from "../../lib/taskTiming.js";
 import { consumeStockPatch } from "../../lib/stock.js";
+import { buildWhatsAppLink } from "../../lib/whatsapp.js";
+import { generateActionToken, buildWorkOrderActionLink, buildWorkOrderWhatsAppMessage, canSendWorkOrderLink } from "../../lib/workOrderLink.js";
 
 // Faz 3+4 — "Talep yönetimi" screenKey'inin (operasyonlar) mobil kabuktaki
 // gerçek karşılığı. Üç ekran (Liste → Detay → Form) TEK bileşende, basit bir
@@ -99,6 +101,19 @@ export function TaskListScreen({ state, updateState, currentUserName, currentUse
     setDetailTask(payload);
   }
 
+  // Kullanıcı teyidiyle: "arıza kaydında açılan işi whatsap'tan link olarak
+  // yollayabilir miyiz" — token yoksa üretilip Firestore'a yazılır (linkin
+  // geçerli olması için görev üzerinde durması şart, bkz. netlify/functions/
+  // work-order-action.js token kontrolü), sonra wa.me linki yeni sekmede
+  // açılır; gönderimi kişi kendi WhatsApp'ında yapar.
+  function sendWorkOrderWhatsApp(task, person) {
+    const token = task.actionToken || generateActionToken();
+    if (token !== task.actionToken) updateState({ tasks: state.tasks.map((tk) => (tk.id === task.id ? { ...tk, actionToken: token } : tk)) });
+    const link = buildWorkOrderActionLink(window.location.origin, task, token);
+    const waLink = buildWhatsAppLink(person.phone, buildWorkOrderWhatsAppMessage(task, link));
+    if (waLink) window.open(waLink, "_blank", "noopener");
+  }
+
   // QuickActions "…" menüsü — spec: "Bu menü aynı mahal bağlamını yeni kayda
   // taşır (mahalId, blok, kat önceden dolu gelir)". Bu depoda mahal bağlamı
   // department + location'dan ibaret (bkz. taskDisplay.js placeOf notu) —
@@ -141,6 +156,9 @@ export function TaskListScreen({ state, updateState, currentUserName, currentUse
       <DetailScreen
         task={live}
         canWrite={canWrite}
+        team={state.team}
+        canSendWhatsApp={canWrite && canSendWorkOrderLink(currentUser)}
+        onSendWhatsApp={sendWorkOrderWhatsApp}
         onBack={() => setDetailTask(null)}
         onEdit={(override) => openEdit(live, override)}
         onAdvanceStatus={(status) => advanceStatus(live, status)}

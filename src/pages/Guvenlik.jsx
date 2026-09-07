@@ -63,7 +63,7 @@ function emptyIncidentForm() {
 // "Güvenlik Devriye" (mahal) sekmesi.
 const MOBILE_DEFAULT_TAB = "mahal";
 
-export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
+export function Guvenlik({ state, updateState, currentUser, currentUserObj, deepLink, onConsumeDeepLink, canWrite = true, mobileMode = false }) {
   const T = useTheme();
   const [tab, setTab] = useState(mobileMode ? MOBILE_DEFAULT_TAB : "devriye");
   const [formOpen, setFormOpen] = useState(false);
@@ -417,7 +417,7 @@ export function Guvenlik({ state, updateState, currentUser, deepLink, onConsumeD
 
       {tab === "gorevler" && (
         mobileMode ? (
-          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} department="Güvenlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
+          <DepartmentTaskListScreen state={state} updateState={updateState} currentUserName={currentUser} currentUserObj={currentUserObj} department="Güvenlik" tasks={deptTasks} title="Görevler" canWrite={canWrite} />
         ) : (
           <div>
             <PageHeader title="Görevler" subtitle={`${deptTasks.length} kayıt — Güvenlik departmanının işleri ve firma talepleri`}

@@ -1,12 +1,12 @@
-// WhatsApp click-to-chat linki — kullanıcı teyidiyle: "personelde cep
-// telefonu olan personele iş emri açıldığında whatsappdan link gönder o
-// link üzerinden iş başlatıp kapatabilsin". Gerçek bir WhatsApp Business
-// API/webhook entegrasyonu bu depoda YOK (openMailto ile AYNI "tarayıcı
-// düzeyinde, backend'siz" kapsam, bkz. lib/mailto.js) — wa.me click-to-chat
-// linki açılır, önceden doldurulmuş mesajı gönderen kişi kendi WhatsApp'ından
-// "Gönder"e basar. Kişi linke tıklayınca uygulamaya döner (zaten oturum
-// açmışsa doğrudan işi başlatıp bitirebilir); şifresiz/tek-tıkla "magic
-// link" kimlik doğrulama YOK, böyle bir iddia da yapılmıyor.
+// WhatsApp click-to-chat linki — genel amaçlı wa.me URL üreticisi, telefon
+// numarası biçimini normalize eder. Gerçek bir WhatsApp Business API/webhook
+// entegrasyonu bu depoda YOK (openMailto ile AYNI "tarayıcı düzeyinde,
+// backend'siz" kapsam, bkz. lib/mailto.js) — wa.me click-to-chat linki
+// açılır, önceden doldurulmuş mesajı gönderen kişi kendi WhatsApp'ından
+// "Gönder"e basar. İki farklı mesaj içeriğiyle kullanılır: TaskForm'daki
+// WhatsAppNotifyRow (kişi linke tıklayınca uygulamaya döner, oturum açması
+// gerekir) ve DetailScreen'deki "WhatsApp Gönder" (bkz. lib/workOrderLink.js
+// — token'lı, oturumsuz "İşi Başlat/Bitir" linki taşır).
 function normalizePhone(phone) {
   const digits = (phone || "").replace(/[^\d]/g, "");
   if (!digits) return null;

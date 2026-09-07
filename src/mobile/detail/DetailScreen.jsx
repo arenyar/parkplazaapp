@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MessageCircle } from "lucide-react";
 import { mobileTokens as t } from "../tokens.js";
 import { PRIORITY_COLOR, STATUS_COLOR, placeOf, formatDateOnlyTR } from "../taskDisplay.js";
+import { buildWhatsAppLink } from "../../lib/whatsapp.js";
 import { StickyActions } from "./StickyActions.jsx";
 import { QuickActions } from "./QuickActions.jsx";
 
@@ -49,7 +50,33 @@ function buildTimeline(task) {
 // karşılığı olmayan bir kavram (Mahal Kontrol ayrı bir veri modeli, bkz.
 // MahalKontrol.jsx/Kontroller.jsx, task'lara bağlı değil) — dürüstçe boş
 // gösterilir, uydurma veri yok.
-export function DetailScreen({ task, canWrite = true, onBack, onEdit, onAdvanceStatus, onQuickAction }) {
+// Kullanıcı teyidiyle: "arıza kaydında açılan işi whatsap'tan link olarak
+// yollayabilir miyiz... whatsapp gönder butonu sadece şefler ve
+// yöneticilerde olsun" — atanan kişilerden telefonu kayıtlı olanlar için
+// wa.me linki (bkz. lib/whatsapp.js); linkin içeriği (oturumsuz İşi Başlat/
+// Bitir) `onSendWhatsApp`'ı sağlayan üst ekranda kurulur (bkz.
+// TaskListScreen.jsx/DepartmentTaskListScreen.jsx) — bu bileşen sadece
+// `canSendWhatsApp` (görüntüleyenin rolü) doğruysa ve iş henüz
+// Tamamlanmadıysa satırı gösterir. Telefonu boş olan kişi için buton hiç
+// gösterilmez, uydurma numara yok.
+function WhatsAppRow({ task, team, canSendWhatsApp, onSendWhatsApp }) {
+  if (!canSendWhatsApp || !onSendWhatsApp || task.status === "Tamamlandı") return null;
+  const names = task.assignees && task.assignees.length > 0 ? task.assignees : (task.assignee ? [task.assignee] : []);
+  const recipients = names.map((name) => (team || []).find((p) => p.name === name)).filter((p) => p && p.phone);
+  if (recipients.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "0 0 14px" }}>
+      {recipients.map((p) => (
+        <button key={p.id} onClick={() => onSendWhatsApp(task, p)}
+          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "#25D366", border: `1px solid ${t.hairline}`, borderRadius: 999, padding: "5px 10px" }}>
+          <MessageCircle size={12} aria-hidden="true" /> {p.name}'a WhatsApp gönder
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function DetailScreen({ task, canWrite = true, team, canSendWhatsApp = false, onSendWhatsApp, onBack, onEdit, onAdvanceStatus, onQuickAction }) {
   const [tab, setTab] = useState("ozet");
   const [quickOpen, setQuickOpen] = useState(false);
   const priorityColor = PRIORITY_COLOR[task.priority] || t.muted;
@@ -118,6 +145,7 @@ export function DetailScreen({ task, canWrite = true, onBack, onEdit, onAdvanceS
             <Row label="Firma" value={task.company} />
             <Row label="Açan" value={task.requester} />
             <Row label="Açıklama" value={task.description} />
+            <WhatsAppRow task={task} team={team} canSendWhatsApp={canSendWhatsApp} onSendWhatsApp={onSendWhatsApp} />
           </div>
         )}
         {tab === "islem" && (
